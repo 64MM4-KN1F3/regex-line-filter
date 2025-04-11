@@ -81,13 +81,13 @@ export default class RegexLineFilterPlugin extends Plugin {
             /* Rule to style the active view when filter is on */
             body.${ACTIVE_FILTER_BODY_CLASS} .workspace-leaf.mod-active .view-content {
                 /* Inset box shadow to darken edges */
-                box-shadow: inset 0 0 0 30px rgba(0, 0, 0, 0.08); /* Adjust size/color/opacity */
+                box-shadow: inset 0 0 0 70px rgba(0, 0, 0, 0.15); /* Adjust size/color/opacity */
 
                 /* Alternatively, adjust padding and background */
                 /* padding: 30px !important; */
                 /* background-color: var(--background-secondary) !important; */
 
-                transition: box-shadow 0.2s ease-in-out; /* Optional smooth transition */
+                transition: box-shadow 0.3s ease-in; /* Optional smooth transition */
             }
 
             /* Ensure padding doesn't affect CodeMirror gutter/line numbers if using padding approach */
