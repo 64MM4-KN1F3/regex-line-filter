@@ -1,0 +1,10 @@
+{
+	"id": "regex-line-filter",
+	"name": "Regex Line Filter",
+	"version": "0.1.0",
+	"minAppVersion": "0.15.0",
+	"description": "Filters the active note to show only lines matching a regex, allowing edits.",
+	"author": "DiH",
+	"authorUrl": "https://dear.inheadlights.com",
+	"isDesktopOnly": false
+}

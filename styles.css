@@ -1,0 +1,8 @@
+/*Styles*/
+/* styles.css for regex-line-filter */
+.regex-filter-hidden-line {
+    display: none !important; /* Use !important to override potential theme styles */
+}
+
+/* Optional: Style the modal slightly if desired */
+/* .regex-input-modal .setting-item-info { ... } */
