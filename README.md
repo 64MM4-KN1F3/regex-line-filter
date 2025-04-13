@@ -25,3 +25,6 @@ The plugin allows users to filter the active editor view in Obsidian so that onl
 **Known Limitations:**
 
 - **Folded text:** Matched lines within folded blocks of text will not be included in the filter.
+
+**License:**
+GNU GPLv3
