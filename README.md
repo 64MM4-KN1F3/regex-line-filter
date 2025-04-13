@@ -18,3 +18,7 @@ The plugin allows users to filter the active editor view in Obsidian so that onl
 - **Visual Indicator:** Adds a subtle darkening effect (inset box-shadow) to the editor margins when the filter is active, providing clear visual feedback.
     
 - **Implementation:** Uses CodeMirror 6 decorations (display: none) to hide non-matching lines without modifying the underlying file structure directly (until edits are made).
+
+**Known Limitations:**
+
+- **Folded text:** Matched lines within folded blocks of text will not be included in the filter.
