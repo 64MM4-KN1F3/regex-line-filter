@@ -1,1 +1,2 @@
-Create new github repo prior to publishing. Some data.json has polluted the original repo
+- Create new github repo prior to publishing. Some data.json has polluted the original repo 🟢
+- https://publish.obsidian.md/hub/04+-+Guides%2C+Workflows%2C+%26+Courses/Guides/How+to+add+your+plugin+to+the+community+plugin+list
