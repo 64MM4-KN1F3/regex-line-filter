@@ -1,5 +1,5 @@
 ## Regex Line Filter plugin for Obsidian
-*insert image here*
+![image](/images/logo.png)
 
 **Purpose:**  
 The plugin allows users to filter the active editor view in Obsidian so that only lines matching a user-supplied regular expression are displayed. Users can edit these visible lines. Toggling the filter off restores the full view of the note with the edits preserved. Toggling it back on re-prompts for a regex (pre-filled with the last used one).
