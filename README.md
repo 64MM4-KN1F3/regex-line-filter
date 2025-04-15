@@ -4,6 +4,9 @@
 **Purpose:**  
 The plugin allows users to filter the active editor view in Obsidian so that only lines matching a user-supplied regular expression are displayed. Users can edit these visible lines. Toggling the filter off restores the full view of the note with the edits preserved. Toggling it back on re-prompts for a regex (pre-filled with the last used one).
 
+**How To:**
+![image](/images/regex-line-filter.gif)
+
 **Key Features:**
 
 - **Regex Filtering:** Filters the current note based on a JavaScript-compatible regex (including emoji support).
