@@ -29,5 +29,8 @@ The plugin allows users to filter the active editor view in Obsidian so that onl
 #### How To:
 ![image](/images/regex-line-filter.gif)
 
+*Demo showing a number of regex filters used with the plugin assigned to a HotKey.*
+
+
 **License:**
 GNU GPLv3
