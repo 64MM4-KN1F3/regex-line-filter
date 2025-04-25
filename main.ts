@@ -115,8 +115,8 @@ export default class RegexLineFilterPlugin extends Plugin {
         await this.loadSettings();
 
         this.addCommand({
-            id: 'toggle-regex-filter',
-            name: 'Toggle Regex Line Filter',
+            id: 'toggle-regex-line-filter',
+            name: 'Toggle',
             editorCallback: (editor: Editor, view: MarkdownView) => {
                 this.toggleFilter(editor, view);
             },
@@ -279,7 +279,16 @@ export default class RegexLineFilterPlugin extends Plugin {
     }
 
     toggleFilter(editor: Editor, view: MarkdownView) {
-        const cm = (editor as any).cm as EditorView;
+        // Access the internal CodeMirror EditorView instance more safely
+        // Assert that the editor object *might* have a 'cm' property of type EditorView
+        const cm = (editor as { cm?: EditorView }).cm;
+
+        // Ensure we actually got an EditorView instance
+        if (!cm || !(cm instanceof EditorView)) {
+            new Notice("Regex filter currently only works in Live Preview or Source Mode views.");
+            console.warn("Regex Line Filter: Could not get CodeMirror EditorView instance from editor."); // Added warning
+            return;
+        }
 
         // Ensure we have a CodeMirror EditorView instance
         if (!cm || !(cm instanceof EditorView)) {
