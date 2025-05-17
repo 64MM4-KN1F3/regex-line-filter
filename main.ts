@@ -1,4 +1,4 @@
-import { App, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting, editorInfoField, TFile } from 'obsidian';
+import { App, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting, WorkspaceLeaf, TFile } from 'obsidian'; // Added WorkspaceLeaf
 import { EditorState, StateField, StateEffect, Extension, RangeSetBuilder } from '@codemirror/state';
 import { Decoration, DecorationSet, EditorView, ViewPlugin, ViewUpdate, WidgetType } from '@codemirror/view';
 
@@ -24,7 +24,7 @@ const filterViewPlugin = ViewPlugin.fromClass(
         update(update: ViewUpdate) { if (update.docChanged || update.viewportChanged || update.state.field(filterStateField) !== update.startState.field(filterStateField)) { this.decorations = this.buildDecorations(update.view); } }
         buildDecorations(view: EditorView): DecorationSet {
             const builder = new RangeSetBuilder<Decoration>();
-            const { regex, enabled, hideEmptyLines } = view.state.field(filterStateField);
+            const { regex, enabled, hideEmptyLines } = view.state.field(filterStateField); // hideEmptyLines from state
             if (!enabled || !regex) {
                 return builder.finish();
             }
@@ -43,18 +43,18 @@ const filterViewPlugin = ViewPlugin.fromClass(
                     if (!matchesRegex) {
                         shouldHide = true;
                     }
+                    // If hideEmptyLines is true, empty lines are hidden regardless of match,
+                    // which is a common interpretation of such a setting.
                     if (hideEmptyLines && isEmpty) {
                         shouldHide = true;
                     }
 
                     if (shouldHide) {
-                        // Hide the entire line by marking its start position
                         builder.add(line.from, line.from, Decoration.line({ attributes: { class: 'regex-filter-hidden-line' } }));
                     }
                 }
             } catch (e) {
                 console.error("Regex Line Filter: Error during decoration build:", e);
-                // Potentially dispatch an effect to disable the filter on error?
             }
             return builder.finish();
         }
@@ -70,26 +70,24 @@ const filterStateField = StateField.define<FilterState>({
         return {
             regex: null,
             enabled: false,
-            hideEmptyLines: DEFAULT_SETTINGS.hideEmptyLines, // Initial value from defaults
+            hideEmptyLines: DEFAULT_SETTINGS.hideEmptyLines,
         };
     },
     update(value, tr): FilterState {
-        let newValue: FilterState = { ...value }; // Create a new object to avoid mutation
+        let newValue: FilterState = { ...value };
 
         for (let effect of tr.effects) {
             if (effect.is(setRegexEffect)) {
                 newValue.regex = effect.value;
-                newValue.enabled = !!effect.value; // Enable only if regex is valid and set
+                newValue.enabled = !!effect.value;
             }
             if (effect.is(toggleFilterEffect)) {
                  newValue.enabled = effect.value;
-                 // If toggling on, ensure there's a regex. If not, force disable.
                  if (effect.value && !newValue.regex) {
                     newValue.enabled = false;
-                    console.warn("Attempted to enable filter without a regex.");
+                    // console.warn("Attempted to enable filter without a regex."); // User will be prompted or it won't enable.
                  }
-                 // If toggling off, ensure enabled is false
-                 if (!effect.value) {
+                 if (!effect.value) { // Explicitly ensure enabled is false if toggling off
                     newValue.enabled = false;
                  }
             }
@@ -99,8 +97,6 @@ const filterStateField = StateField.define<FilterState>({
         }
         return newValue;
     },
-    // Provide the state field to the view plugin if needed
-    // provide: f => EditorView.decorations.from(f) // This might not be needed if using ViewPlugin explicitly
 });
 
 
@@ -123,36 +119,66 @@ export default class RegexLineFilterPlugin extends Plugin {
         });
 
         this.addSettingTab(new RegexLineFilterSettingTab(this.app, this));
-
-        // Register the CodeMirror 6 extension
         this.registerEditorExtension([filterStateField, filterViewPlugin]);
+        this.addCssVariables();
 
-        // Add the CSS rules
-        this.addCss();
+        // Register event listener for active leaf changes
+        this.registerEvent(
+            this.app.workspace.on('active-leaf-change', this.handleActiveLeafChange)
+        );
 
-        // Ensure settings are applied to existing editors when layout is ready
-         this.app.workspace.onLayoutReady(() => {
+        this.app.workspace.onLayoutReady(() => {
             this.dispatchSettingToEditors(this.settings.hideEmptyLines);
+            // Set initial body class based on the currently active leaf after layout is ready
+            this.updateBodyClassForActiveLeaf();
         });
     }
 
     onunload() {
         console.log('Unloading Regex Line Filter plugin');
-        this.removeCss(); // Remove CSS styles
-        // Ensure filter is turned off in all editors
-        this.app.workspace.iterateCodeMirrors(cm => {
-            try {
-                const currentFilterState = cm.state.field(filterStateField, false);
-                if (currentFilterState?.enabled) {
-                    cm.dispatch({ effects: toggleFilterEffect.of(false) });
-                }
-            } catch (e) { /* Ignore errors if field doesn't exist */ }
-        });
+        this.removeCssVariables(); // This also removes the body class as a final cleanup
+        // Events registered with this.registerEvent are automatically cleaned up by Obsidian
     }
+
+    // Method to handle active leaf changes - use arrow function for `this`
+    private handleActiveLeafChange = (leaf: WorkspaceLeaf | null): void => {
+        let filterIsEnabledOnActiveLeaf = false;
+        if (leaf && leaf.view instanceof MarkdownView) {
+            const markdownView = leaf.view;
+            const editor = markdownView.editor;
+            // Safely access CodeMirror EditorView instance
+            const cm = (editor as { cm?: EditorView })?.cm;
+
+            // Check if CM instance and our state field exist
+            if (cm && cm.state && typeof cm.state.field === 'function' && cm.state.field(filterStateField, false) !== undefined) {
+                const currentFilterState = cm.state.field(filterStateField);
+                if (currentFilterState.enabled && currentFilterState.regex) {
+                    filterIsEnabledOnActiveLeaf = true;
+                }
+            }
+        }
+
+        if (filterIsEnabledOnActiveLeaf) {
+            document.body.classList.add(ACTIVE_FILTER_BODY_CLASS);
+        } else {
+            document.body.classList.remove(ACTIVE_FILTER_BODY_CLASS);
+        }
+    }
+
+    // Method to update body class based on the current active leaf's filter state
+    private updateBodyClassForActiveLeaf(): void {
+        const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+        if (activeView) {
+            this.handleActiveLeafChange(activeView.leaf);
+        } else {
+            // No active MarkdownView, so treat as no filter active for vignette purposes
+            this.handleActiveLeafChange(null);
+        }
+    }
+
 
     async loadSettings() {
         this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
-        // Ensure regexHistory is an array and trim it
         if (!Array.isArray(this.settings.regexHistory)) {
             this.settings.regexHistory = [];
         }
@@ -164,230 +190,147 @@ export default class RegexLineFilterPlugin extends Plugin {
     }
 
     updateRegexHistory(newRegexString: string) {
-        // Remove existing entry if it exists
         const filteredHistory = this.settings.regexHistory.filter(r => r !== newRegexString);
-        // Add new entry to the beginning
         const updatedHistory = [newRegexString, ...filteredHistory];
-        // Trim to the limit
         this.settings.regexHistory = updatedHistory.slice(0, REGEX_HISTORY_LIMIT);
         this.saveSettings();
     }
 
-    // Dispatch hideEmptyLines setting changes to all open editors
     dispatchSettingToEditors(newValue: boolean) {
         this.app.workspace.iterateCodeMirrors(cm => {
             try {
-                // Check if the state field exists before dispatching
                  if (cm.state.field(filterStateField, false) !== undefined) {
                     cm.dispatch({
                         effects: setHideEmptyLinesEffect.of(newValue)
                     });
                  }
             } catch (e) {
-                // It's possible an editor doesn't have the state field (e.g., canvas?)
                 console.warn("Regex Line Filter: Error dispatching setting to an editor view", e);
             }
         });
     }
 
-    // ----- Add CSS Modified for LEFT/RIGHT Vignette using Pseudo-elements -----
-    addCss() {
-        const cssId = 'regex-filter-styles';
-        if (document.getElementById(cssId)) return; // Don't add if already exists
+    addCssVariables() {
+        const cssId = 'regex-filter-dynamic-styles';
+        if (document.getElementById(cssId)) return;
 
-        // --- Adjust these values for vignette appearance ---
-        const vignetteWidth = '160px';       // How WIDE the vignette area is at left/right
-        const vignetteColor = 'rgba(0, 0, 0, 0.4)'; // Darkness and opacity of the vignette
-        const transitionDuration = '0.3s';   // Fade-in/out speed
-        // --- End Adjust ---
+        const vignetteWidth = '160px';
+        const vignetteColor = 'rgba(0, 0, 0, 0.4)';
+        const transitionDuration = '0.3s';
 
-        const css = `
-            /* Rule to hide non-matching lines (Keep this) */
-            .regex-filter-hidden-line {
-                display: none !important;
-            }
-
-            /* Make view-content a positioning context for pseudo-elements */
-            .workspace-leaf.mod-active .view-content {
-                position: relative;
-                /* Optional: May help prevent horizontal scrollbars if content is very close to edges */
-                /* overflow: hidden; */
-            }
-
-            /* Define the pseudo-elements base styles */
-            .workspace-leaf.mod-active .view-content::before,
-            .workspace-leaf.mod-active .view-content::after {
-                content: '';
-                position: absolute;
-                top: 0;  /* Stretch full height */
-                bottom: 0; /* Stretch full height */
-                width: ${vignetteWidth}; /* Define the width of the vignette */
-                z-index: 5;
-                pointer-events: none;
-                opacity: 0;
-                transition: opacity ${transitionDuration} ease-in-out;
-                /* Background gradient is set below */
-            }
-
-            /* Left vignette gradient */
-            .workspace-leaf.mod-active .view-content::before {
-                left: 0; /* Position on the left */
-                background: linear-gradient(
-                    to right, /* Fade from left to right */
-                    ${vignetteColor} 0%,
-                    transparent 100%
-                );
-            }
-
-            /* Right vignette gradient */
-            .workspace-leaf.mod-active .view-content::after {
-                right: 0; /* Position on the right */
-                background: linear-gradient(
-                    to left, /* Fade from right to left */
-                    ${vignetteColor} 0%,
-                    transparent 100%
-                );
-            }
-
-            /* Rule to fade IN the vignettes ONLY when filter is active */
-            body.${ACTIVE_FILTER_BODY_CLASS} .workspace-leaf.mod-active .view-content::before,
-            body.${ACTIVE_FILTER_BODY_CLASS} .workspace-leaf.mod-active .view-content::after {
-                opacity: 1; /* Fade in */
+        const cssVars = `
+            :root {
+              --regex-filter-vignette-width: ${vignetteWidth};
+              --regex-filter-vignette-color: ${vignetteColor};
+              --regex-filter-transition-duration: ${transitionDuration};
             }
         `;
         this.cssStyleEl = document.createElement('style');
         this.cssStyleEl.id = cssId;
-        this.cssStyleEl.textContent = css;
+        this.cssStyleEl.textContent = cssVars;
         document.head.appendChild(this.cssStyleEl);
-        }
-    // ----- End addCss -----
+    }
 
-
-    removeCss() {
-        // Remove our specific style element
+    removeCssVariables() {
         if (this.cssStyleEl) {
             this.cssStyleEl.remove();
             this.cssStyleEl = null;
         }
-        // As a fallback, try removing by ID again in case the reference was lost
-        const existingStyle = document.getElementById('regex-filter-styles');
+        const existingStyle = document.getElementById('regex-filter-dynamic-styles');
         if (existingStyle) {
             existingStyle.remove();
         }
-        // Clean up the body class
         document.body.classList.remove(ACTIVE_FILTER_BODY_CLASS);
     }
 
+
     toggleFilter(editor: Editor, view: MarkdownView) {
-        // Access the internal CodeMirror EditorView instance more safely
-        // Assert that the editor object *might* have a 'cm' property of type EditorView
         const cm = (editor as { cm?: EditorView }).cm;
-
-        // Ensure we actually got an EditorView instance
         if (!cm || !(cm instanceof EditorView)) {
             new Notice("Regex filter currently only works in Live Preview or Source Mode views.");
-            console.warn("Regex Line Filter: Could not get CodeMirror EditorView instance from editor."); // Added warning
+            console.warn("Regex Line Filter: Could not get CodeMirror EditorView instance from editor.");
             return;
         }
 
-        // Ensure we have a CodeMirror EditorView instance
-        if (!cm || !(cm instanceof EditorView)) {
-            new Notice("Regex filter currently only works in Live Preview or Source Mode views.");
-            return;
-        }
-
-        // Check if the state field actually exists in this editor instance
-        const currentFilterState = cm.state.field(filterStateField, false); // Use false to avoid throwing error if field not present
+        const currentFilterState = cm.state.field(filterStateField, false);
         if(currentFilterState === undefined) {
-            // This might happen if the editor was opened before the plugin loaded its extensions completely
              new Notice("Filter state not found for this editor. Please try toggling again, or reload the note.");
             return;
         }
 
-
         if (currentFilterState.enabled) {
-            // Disable filter
             cm.dispatch({ effects: toggleFilterEffect.of(false) });
-            document.body.classList.remove(ACTIVE_FILTER_BODY_CLASS);
+            this.updateBodyClassForActiveLeaf(); // Update based on new state
             new Notice('Regex filter disabled.');
         } else {
-            // Enable filter - Prompt for regex first
+            // Prompting will lead to state change and then updateBodyClassForActiveLeaf call
             this.promptForRegex(cm);
         }
     }
 
     promptForRegex(cm: EditorView) {
-        // Prefill with the last used regex, or the most recent history entry, or empty
         const prefillValue = this.lastRegexStr ?? this.settings.regexHistory[0] ?? "";
         new RegexInputModal(
             this.app,
             prefillValue,
-            this.settings.regexHistory, // Pass history
+            this.settings.regexHistory,
             (result) => {
                 if (result) {
                     try {
-                        // Create RegExp - use 'u' flag for Unicode support
                         const regex = new RegExp(result, 'u');
+                        this.lastRegexStr = result;
+                        this.updateRegexHistory(result);
 
-                        this.lastRegexStr = result; // Store last used regex (session only)
-                        this.updateRegexHistory(result); // Update persistent history
-
-                        // Dispatch effects to update regex and enable the filter
                         cm.dispatch({
                            effects: [
-                                setRegexEffect.of(regex) // This will also set enabled = true in the state field logic
+                                setRegexEffect.of(regex) // This also sets enabled = true
                            ]
                         });
-                        document.body.classList.add(ACTIVE_FILTER_BODY_CLASS); // Add body class for CSS styling
+                        this.updateBodyClassForActiveLeaf(); // Update based on new state
                         new Notice(`Regex filter enabled: /${result}/u`);
                     } catch (e) {
                         const errorMessage = (e instanceof Error) ? e.message : String(e);
-                        new Notice(`Invalid Regex: ${errorMessage}`);
+                        new Notice(`Invalid regex: ${errorMessage}`);
                         console.error("Regex Compile Error:", e);
-                        // Ensure filter is disabled if regex is invalid
-                        document.body.classList.remove(ACTIVE_FILTER_BODY_CLASS);
-                        try { cm.dispatch({ effects: toggleFilterEffect.of(false) }); } catch(e) { /* Ignore error if field somehow not available */ }
+                        // Ensure filter is disabled in CM state if regex compilation failed
+                        try { cm.dispatch({ effects: toggleFilterEffect.of(false) }); } catch (cmError) { /* ignore */ }
+                        this.updateBodyClassForActiveLeaf(); // Update based on new state (filter disabled)
                     }
-                } else {
-                    // User cancelled
+                } else { // User cancelled or submitted empty
                     new Notice('Regex filter cancelled.');
-                     // Ensure filter is disabled if cancelled
-                    document.body.classList.remove(ACTIVE_FILTER_BODY_CLASS);
-                    try { cm.dispatch({ effects: toggleFilterEffect.of(false) }); } catch(e) { /* Ignore error */ }
+                     // Ensure filter is disabled in CM state
+                    try { cm.dispatch({ effects: toggleFilterEffect.of(false) }); } catch (cmError) { /* ignore */ }
+                    this.updateBodyClassForActiveLeaf(); // Update based on new state (filter disabled)
                 }
             }
         ).open();
     }
-} // End of Plugin Class
+}
 
 // --- Settings Tab Class ---
 class RegexLineFilterSettingTab extends PluginSettingTab {
-	plugin: RegexLineFilterPlugin;
+  plugin: RegexLineFilterPlugin;
 
-	constructor(app: App, plugin: RegexLineFilterPlugin) {
-		super(app, plugin);
-		this.plugin = plugin;
-	}
+  constructor(app: App, plugin: RegexLineFilterPlugin) {
+    super(app, plugin);
+    this.plugin = plugin;
+  }
 
-	display(): void {
-		const {containerEl} = this;
+  display(): void {
+    const {containerEl} = this;
+    containerEl.empty();
 
-		containerEl.empty();
-
-		containerEl.createEl('h2', {text: 'Regex Line Filter Settings'});
-
-		new Setting(containerEl)
-			.setName('Hide empty lines')
-			.setDesc('When the filter is active, also hide lines that contain only whitespace.')
-			.addToggle(toggle => toggle
-				.setValue(this.plugin.settings.hideEmptyLines)
-				.onChange(async (value) => {
-					this.plugin.settings.hideEmptyLines = value;
-					await this.plugin.saveSettings();
-                    // Dispatch the change to all open editors
-                    this.plugin.dispatchSettingToEditors(value);
-				}));
-	}
+    new Setting(containerEl)
+      .setName('Hide empty lines')
+      .setDesc('When the filter is active, also hide lines that contain only whitespace.')
+      .addToggle(toggle => toggle
+        .setValue(this.plugin.settings.hideEmptyLines)
+        .onChange(async (value) => {
+          this.plugin.settings.hideEmptyLines = value;
+          await this.plugin.saveSettings();
+          this.plugin.dispatchSettingToEditors(value); // This will trigger view updates and buildDecorations
+        }));
+  }
 }
 
 // --- Modal Class definition ---
@@ -395,78 +338,69 @@ class RegexInputModal extends Modal {
     result: string;
     onSubmit: (result: string | null) => void;
     initialValue: string;
-    history: string[]; // Added history property
-    inputComponent: Setting; // To access the input element later
-    textInputEl: HTMLInputElement | null = null; // Reference to the input element
+    history: string[];
+    inputComponent: Setting;
+    textInputEl: HTMLInputElement | null = null;
 
     constructor(app: App, initialValue: string, history: string[], onSubmit: (result: string | null) => void) {
         super(app);
         this.initialValue = initialValue;
-        this.history = history; // Store history
+        this.history = history;
         this.onSubmit = onSubmit;
-        this.result = initialValue; // Initialize result with initial value
+        this.result = initialValue;
     }
 
     onOpen() {
         const { contentEl } = this;
-        contentEl.empty(); // Clear previous content
+        contentEl.empty();
 
-        contentEl.createEl('h2', { text: 'Enter Regex Filter' });
+        contentEl.createEl('h2', { text: 'Enter regex filter' });
 
-        this.inputComponent = new Setting(contentEl) // Store the Setting object
-            .setName('Regular Expression (supports Unicode):')
+        this.inputComponent = new Setting(contentEl)
+            .setName('Regular expression (supports Unicode):')
             .addText((text) => {
-                this.textInputEl = text.inputEl; // Get the input element
+                this.textInputEl = text.inputEl;
                 text
                     .setValue(this.initialValue)
                     .setPlaceholder('e.g., ^\\s*- \\[ \\].*💡')
                     .onChange((value) => {
                         this.result = value;
                     });
-                // Focus and select the text input when the modal opens
                 text.inputEl.focus();
                 text.inputEl.select();
-
-                // Add keydown listener for Enter key
                 text.inputEl.addEventListener('keydown', (e) => {
-                    // Submit on Enter unless Shift/Ctrl/Meta/Alt is pressed
                     if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
-                         e.preventDefault(); // Prevent default Enter behavior (like newline)
+                         e.preventDefault();
                          this.submit();
                     }
                  });
-
             });
 
-        // Add a specific class to the control element for potential styling
          this.inputComponent.controlEl.addClass('regex-filter-input-control');
 
-
-        // Display history buttons if history is not empty
         if (this.history && this.history.length > 0) {
             const historyEl = contentEl.createDiv({ cls: 'regex-filter-history-container' });
             historyEl.createSpan({ text: 'History:', cls: 'regex-filter-history-label' });
             this.history.forEach(histEntry => {
                 const btn = historyEl.createEl('button', {
-                    text: `/${histEntry}/`, // Display regex clearly
+                    text: `/${histEntry}/`,
                     cls: 'regex-filter-history-item',
-                    attr: { title: histEntry } // Full regex on hover
+                    attr: { title: histEntry }
                 });
                 btn.addEventListener('click', () => {
                     if (this.textInputEl) {
-                        this.textInputEl.value = histEntry; // Set input value
+                        this.textInputEl.value = histEntry;
                         this.result = histEntry; // Update internal result
-                        this.textInputEl.focus(); // Refocus input
+                        this.textInputEl.focus();
                     }
                 });
             });
         }
 
-        // Add Submit and Cancel buttons
         new Setting(contentEl)
             .addButton((btn) => btn
-                .setButtonText('Apply Filter')
-                .setCta() // Make it the prominent button
+                .setButtonText('Apply filter')
+                .setCta()
                 .onClick(() => {
                     this.submit();
                 }))
@@ -479,25 +413,23 @@ class RegexInputModal extends Modal {
     }
 
     submit() {
-        // Only submit if the result is not just whitespace
         if (this.result && this.result.trim().length > 0) {
             this.close();
             this.onSubmit(this.result);
-        } else if (this.result === "") {
-             // Handle empty string submission explicitly
-             new Notice("Regex cannot be empty. Filter cancelled.");
+        } else if (this.result === "") { // Explicitly handle empty string submission
+             // Notice handled by caller (promptForRegex) if needed, or here directly.
+             // For consistency, let onSubmit(null) signify "no valid regex".
              this.close();
              this.onSubmit(null);
-        } else {
-            // Handle whitespace-only input
+        } else { // Whitespace only
             new Notice("Please enter a valid regular expression.");
-            // Optionally clear the input or keep it as is
             if(this.textInputEl) this.textInputEl.focus();
+            // Do not close, do not submit.
         }
     }
 
     onClose() {
         let { contentEl } = this;
-        contentEl.empty(); // Clean up the modal content
+        contentEl.empty();
     }
 }

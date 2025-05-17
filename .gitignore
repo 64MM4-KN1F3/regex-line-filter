@@ -1,5 +1,5 @@
 data.json
-/node_modules
+node_modules/
 main.js
 TODO.md
 .DS_Store

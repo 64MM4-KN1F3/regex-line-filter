@@ -1,8 +1,114 @@
-/*Styles*/
 /* styles.css for regex-line-filter */
+
+/*
+  Default values for CSS variables.
+  The actual values used can be overridden by the plugin's main.ts
+  by injecting a style block that redefines these variables.
+*/
+:root {
+  --regex-filter-vignette-width: 160px; /* Default width of the vignette area */
+  --regex-filter-vignette-color: rgba(0, 0, 0, 0.4); /* Default color and opacity of the vignette */
+  --regex-filter-transition-duration: 0.3s; /* Default fade-in/out speed for the vignette */
+}
+
+/* Rule to hide non-matching lines */
 .regex-filter-hidden-line {
     display: none !important; /* Use !important to override potential theme styles */
 }
 
-/* Optional: Style the modal slightly if desired */
+/* Vignette Styles */
+/* Make view-content a positioning context for pseudo-elements */
+.workspace-leaf.mod-active .view-content {
+    position: relative;
+    /* Optional: May help prevent horizontal scrollbars if content is very close to edges.
+       Be cautious as this can also hide legitimate scrollbars if not scoped carefully. */
+    /* overflow: hidden; */
+}
+
+/* Define the pseudo-elements base styles for vignettes */
+.workspace-leaf.mod-active .view-content::before,
+.workspace-leaf.mod-active .view-content::after {
+    content: '';
+    position: absolute;
+    top: 0;  /* Stretch full height */
+    bottom: 0; /* Stretch full height */
+    width: var(--regex-filter-vignette-width); /* Use CSS variable for width */
+    z-index: 5; /* Ensure vignette is above content but ideally below UI elements like scrollbars */
+    pointer-events: none; /* Vignette should not intercept mouse events */
+    opacity: 0; /* Initially hidden */
+    transition: opacity var(--regex-filter-transition-duration) ease-in-out; /* Use CSS variable for transition */
+}
+
+/* Left vignette gradient */
+.workspace-leaf.mod-active .view-content::before {
+    left: 0; /* Position on the left */
+    background: linear-gradient(
+        to right, /* Fade from left to right */
+        var(--regex-filter-vignette-color) 0%, /* Use CSS variable for color */
+        transparent 100%
+    );
+}
+
+/* Right vignette gradient */
+.workspace-leaf.mod-active .view-content::after {
+    right: 0; /* Position on the right */
+    background: linear-gradient(
+        to left, /* Fade from right to left */
+        var(--regex-filter-vignette-color) 0%, /* Use CSS variable for color */
+        transparent 100%
+    );
+}
+
+/* Rule to fade IN the vignettes ONLY when filter is active */
+/* The ACTIVE_FILTER_BODY_CLASS constant in main.ts is 'regex-filter-active-body' */
+body.regex-filter-active-body .workspace-leaf.mod-active .view-content::before,
+body.regex-filter-active-body .workspace-leaf.mod-active .view-content::after {
+    opacity: 1; /* Fade in */
+}
+
+
+/* Styles for RegexInputModal history buttons and layout */
+.regex-filter-history-container {
+    display: flex;
+    flex-wrap: wrap; /* Allow buttons to wrap to the next line */
+    align-items: center;
+    gap: 6px; /* Space between "History:" label and buttons, and between buttons themselves */
+    margin-top: 8px; /* Space above the history section */
+    margin-bottom: 12px; /* Space below the history section */
+}
+
+.regex-filter-history-label {
+    font-weight: 500; /* Medium weight, less than bold */
+    font-size: var(--font-ui-small); /* Use Obsidian's UI font size variables */
+    margin-right: 4px; /* Space after the "History:" text */
+    color: var(--text-muted); /* Use Obsidian's muted text color */
+}
+
+.regex-filter-history-item {
+    padding: 3px 7px; /* Padding inside each history button */
+    border: 1px solid var(--background-modifier-border); /* Use Obsidian's border variable */
+    border-radius: var(--radius-s); /* Use Obsidian's small radius variable */
+    background-color: var(--background-secondary-alt); /* A slightly different background */
+    cursor: pointer;
+    font-size: var(--font-ui-smaller); /* Smaller font for history items */
+    color: var(--text-normal); /* Standard text color */
+    transition: background-color 0.15s ease-out, color 0.15s ease-out;
+}
+
+.regex-filter-history-item:hover {
+    background-color: var(--background-modifier-hover); /* Use Obsidian's hover background */
+    color: var(--text-accent-hover); /* Use Obsidian's accent color on hover, or var(--text-normal) */
+}
+
+/* Ensure the text input control in the modal can utilize available width */
+.regex-filter-input-control .setting-item-control {
+    width: 100%; /* Make the control div take full width */
+}
+.regex-filter-input-control .setting-item-control input[type="text"] {
+    width: 100%; /* Make the text input element itself take full width */
+    box-sizing: border-box; /* Include padding and border in the element's total width and height */
+}
+
+/* Optional: Further styling for the modal if desired */
 /* .regex-input-modal .setting-item-info { ... } */
+/* .regex-input-modal .modal-title { ... } */
