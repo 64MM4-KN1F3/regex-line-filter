@@ -1,10 +1,5 @@
 /* styles.css for regex-line-filter */
 
-/*
-  Default values for CSS variables.
-  The actual values used can be overridden by the plugin's main.ts
-  by injecting a style block that redefines these variables.
-*/
 :root {
   --regex-filter-vignette-width: 160px; /* Default width of the vignette area */
   --regex-filter-vignette-color: rgba(0, 0, 0, 0.4); /* Default color and opacity of the vignette */
@@ -20,9 +15,6 @@
 /* Make view-content a positioning context for pseudo-elements */
 .workspace-leaf.mod-active .view-content {
     position: relative;
-    /* Optional: May help prevent horizontal scrollbars if content is very close to edges.
-       Be cautious as this can also hide legitimate scrollbars if not scoped carefully. */
-    /* overflow: hidden; */
 }
 
 /* Define the pseudo-elements base styles for vignettes */
@@ -108,7 +100,3 @@ body.regex-filter-active-body .workspace-leaf.mod-active .view-content::after {
     width: 100%; /* Make the text input element itself take full width */
     box-sizing: border-box; /* Include padding and border in the element's total width and height */
 }
-
-/* Optional: Further styling for the modal if desired */
-/* .regex-input-modal .setting-item-info { ... } */
-/* .regex-input-modal .modal-title { ... } */
