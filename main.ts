@@ -22,29 +22,57 @@ const filterViewPlugin = ViewPlugin.fromClass(
         decorations: DecorationSet;
         constructor(view: EditorView) { this.decorations = this.buildDecorations(view); }
         update(update: ViewUpdate) { if (update.docChanged || update.viewportChanged || update.state.field(filterStateField) !== update.startState.field(filterStateField)) { this.decorations = this.buildDecorations(update.view); } }
+
         buildDecorations(view: EditorView): DecorationSet {
             const builder = new RangeSetBuilder<Decoration>();
-            const { regex, enabled, hideEmptyLines } = view.state.field(filterStateField); // hideEmptyLines from state
+            const { regex, enabled, hideEmptyLines } = view.state.field(filterStateField);
+
             if (!enabled || !regex) {
                 return builder.finish();
             }
+
             const doc = view.state.doc;
+            // Use a 1-indexed boolean array to track visibility. 'true' means show.
+            const isVisible = new Array(doc.lines + 1).fill(false);
+
+            // Helper to get indentation level by counting leading whitespace characters.
+            const getIndentLevel = (text: string): number => {
+                const match = text.match(/^(\s*)/);
+                return match ? match[1].length : 0;
+            };
+
             try {
+                // Pass 1: Determine all lines to show.
+                // A line is shown if it matches the regex or is a child of a match.
                 for (let i = 1; i <= doc.lines; i++) {
                     const line = doc.line(i);
-                    const lineText = line?.text;
-                    if (typeof lineText !== 'string') {
-                        continue;
-                    }
-                    const isEmpty = lineText.trim().length === 0;
-                    let shouldHide = false;
-                    let matchesRegex = regex.test(lineText);
+                    if (regex.test(line.text)) {
+                        isVisible[i] = true; // Show the matching line.
 
-                    if (!matchesRegex) {
-                        shouldHide = true;
+                        const parentIndent = getIndentLevel(line.text);
+                        // Mark all subsequent, more-indented lines (children) as visible.
+                        for (let j = i + 1; j <= doc.lines; j++) {
+                            const childLine = doc.line(j);
+                            const childIndent = getIndentLevel(childLine.text);
+
+                            if (childIndent > parentIndent) {
+                                isVisible[j] = true;
+                            } else {
+                                // The block of children has ended.
+                                break;
+                            }
+                        }
                     }
-                    // If hideEmptyLines is true, empty lines are hidden regardless of match,
-                    // which is a common interpretation of such a setting.
+                }
+
+                // Pass 2: Apply hiding decorations.
+                for (let i = 1; i <= doc.lines; i++) {
+                    const line = doc.line(i);
+                    const isEmpty = line.text.trim().length === 0;
+
+                    let shouldHide = !isVisible[i];
+
+                    // The 'hideEmptyLines' setting is a final override to hide any empty line.
                     if (hideEmptyLines && isEmpty) {
                         shouldHide = true;
                     }
@@ -56,6 +84,7 @@ const filterViewPlugin = ViewPlugin.fromClass(
             } catch (e) {
                 console.error("Regex Line Filter: Error during decoration build:", e);
             }
+
             return builder.finish();
         }
     },
