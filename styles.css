@@ -11,7 +11,7 @@
     display: none !important; /* Use !important to override potential theme styles */
 }
 
-/* Vignette Styles */
+/* --- Vignette Styles --- */
 /* Make view-content a positioning context for pseudo-elements */
 .workspace-leaf.mod-active .view-content {
     position: relative;
@@ -59,44 +59,122 @@ body.regex-filter-active-body .workspace-leaf.mod-active .view-content::after {
 }
 
 
+/* --- Modal Styles (RegexInputModal & AddSavedRegexModal) --- */
+
 /* Styles for RegexInputModal history buttons and layout */
 .regex-filter-history-container {
     display: flex;
     flex-wrap: wrap; /* Allow buttons to wrap to the next line */
     align-items: center;
-    gap: 6px; /* Space between "History:" label and buttons, and between buttons themselves */
-    margin-top: 8px; /* Space above the history section */
-    margin-bottom: 12px; /* Space below the history section */
+    gap: var(--size-4-2); /* 6px, consistent with Obsidian's var(--size-4-2) if available, else 6px */
+    margin-top: var(--size-4-3); /* 12px, consistent with Obsidian's var(--size-4-3) if available, else 8px */
+    margin-bottom: var(--size-4-4); /* 16px, consistent with Obsidian's var(--size-4-4) if available, else 12px */
 }
 
 .regex-filter-history-label {
     font-weight: 500; /* Medium weight, less than bold */
     font-size: var(--font-ui-small); /* Use Obsidian's UI font size variables */
-    margin-right: 4px; /* Space after the "History:" text */
+    margin-right: var(--size-4-1); /* 4px */
     color: var(--text-muted); /* Use Obsidian's muted text color */
 }
 
 .regex-filter-history-item {
-    padding: 3px 7px; /* Padding inside each history button */
+    padding: var(--size-2-1) var(--size-4-2); /* approx 3px 7px */
     border: 1px solid var(--background-modifier-border); /* Use Obsidian's border variable */
     border-radius: var(--radius-s); /* Use Obsidian's small radius variable */
     background-color: var(--background-secondary-alt); /* A slightly different background */
     cursor: pointer;
     font-size: var(--font-ui-smaller); /* Smaller font for history items */
     color: var(--text-normal); /* Standard text color */
-    transition: background-color 0.15s ease-out, color 0.15s ease-out;
+    transition: background-color 0.15s ease-out, color 0.15s ease-out, border-color 0.15s ease-out;
 }
 
 .regex-filter-history-item:hover {
     background-color: var(--background-modifier-hover); /* Use Obsidian's hover background */
+    border-color: var(--background-modifier-border-hover);
     color: var(--text-accent-hover); /* Use Obsidian's accent color on hover, or var(--text-normal) */
 }
 
-/* Ensure the text input control in the modal can utilize available width */
+/* Ensure the text input control in the RegexInputModal can utilize available width */
 .regex-filter-input-control .setting-item-control {
     width: 100%; /* Make the control div take full width */
 }
 .regex-filter-input-control .setting-item-control input[type="text"] {
     width: 100%; /* Make the text input element itself take full width */
     box-sizing: border-box; /* Include padding and border in the element's total width and height */
+}
+
+/* Ensure text input in AddSavedRegexModal (and other modals using Setting) takes full width */
+.modal-content .setting-item-control input[type="text"] {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+
+/* --- Settings Tab: Saved Regex Filters --- */
+.saved-regex-list {
+    margin-top: var(--size-4-3); /* 12px, space above the list or "no items" message */
+}
+
+/* Style for the "No saved regex filters yet..." message */
+.saved-regex-list > p {
+    color: var(--text-faint);
+    font-style: italic;
+    margin-top: var(--size-4-2); /* 8px */
+    padding: var(--size-4-3); /* 12px */
+    text-align: center;
+    border: 1px dashed var(--background-modifier-border); /* Optional: subtle border */
+    border-radius: var(--radius-m);
+}
+
+.saved-regex-items-wrapper {
+    display: flex;
+    flex-direction: column;
+    gap: var(--size-4-2); /* 8px space between items */
+}
+
+.saved-regex-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--size-4-2) var(--size-4-3); /* 8px top/bottom, 12px left/right */
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  background-color: var(--background-secondary); /* Subtle background for list items */
+}
+
+.saved-regex-text {
+  flex-grow: 1;
+  margin-right: var(--size-4-3); /* 12px space before buttons */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: default;
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-small);
+  color: var(--text-normal);
+}
+
+/* Override for the Setting component used for buttons inside saved-regex-item */
+/* This is to strip default Setting styling when nested for controls */
+.saved-regex-item .setting-item {
+  padding: 0 !important;
+  border: none !important;
+  background-color: transparent !important;
+}
+
+/* Ensure the control part of the nested Setting doesn't add extra margins */
+.saved-regex-item .setting-item-control {
+  margin: 0;
+  display: flex; /* Helps align buttons if needed */
+  align-items: center;
+}
+
+/* Spacing for icon buttons (ExtraButton) within the control element */
+.saved-regex-item .setting-item-control .clickable-icon {
+  margin-left: var(--size-4-2); /* 8px */
+}
+/* No margin for the first button in the group */
+.saved-regex-item .setting-item-control .clickable-icon:first-child {
+  margin-left: 0;
 }
