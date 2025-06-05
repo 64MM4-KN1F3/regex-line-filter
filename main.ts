@@ -186,7 +186,7 @@ export default class RegexLineFilterPlugin extends Plugin {
         await this.loadSettings(); // Ensures settings are loaded before .init() uses them
 
         this.addCommand({
-            id: 'toggle-regex-line-filter-globally',
+            id: 'toggle-regex-line-filter',
             name: 'Toggle Regex Line Filter (Manual/Clear All)',
             editorCallback: (editor: Editor, view: MarkdownView) => this.toggleGlobalFilter(editor, view),
         });
@@ -299,15 +299,18 @@ export default class RegexLineFilterPlugin extends Plugin {
 
     toggleGlobalFilter(editor: Editor, view: MarkdownView) {
         const cm = (editor as { cm?: EditorView }).cm;
-        if (!cm || !(cm instanceof EditorView)) { new Notice("Filter not available in this view."); return; }
+        if (!cm || !(cm instanceof EditorView)) {
+            new Notice("Filter not available in this view.");
+            return;
+        }
         const currentFilterState = cm.state.field(filterStateField);
 
-        if (currentFilterState.enabled) {
-            cm.dispatch({ effects: clearAllRegexesEffect.of() });
+        if (currentFilterState.enabled) { // If ANY filter is active (saved or manual)
+            cm.dispatch({ effects: clearAllRegexesEffect.of() }); // Clear ALL active regexes
             this.updateBodyClassForActiveLeaf();
             new Notice('All regex filters disabled.');
-        } else {
-            this.promptForManualRegex(cm);
+        } else { // If NO filters are active
+            this.promptForManualRegex(cm); // Prompt for a new, single manual filter
         }
     }
 
@@ -318,30 +321,34 @@ export default class RegexLineFilterPlugin extends Plugin {
             prefillValue,
             this.settings.regexHistory,
             (result: string | null): void => {
-                if (result) {
+                if (result && result.trim() !== "") { // Ensure result is not null or just whitespace
                     try {
                         new RegExp(result, 'u'); // Validate syntax before applying
                         this.lastRegexStr = result;
                         this.updateRegexHistory(result);
+                        // applyManualRegexStringEffect will set this as the ONLY active filter
                         cm.dispatch({ effects: [applyManualRegexStringEffect.of(result)] });
                         this.updateBodyClassForActiveLeaf();
                         new Notice(`Regex filter enabled: /${result}/u`);
                     } catch (e) {
                         new Notice(`Invalid regex: ${(e as Error).message}`);
                         // If manual input is invalid, ensure all filters are cleared
-                        // as applyManualRegexStringEffect is meant to replace all.
                         cm.dispatch({ effects: applyManualRegexStringEffect.of(null) });
                         this.updateBodyClassForActiveLeaf();
                     }
-                } else { // User cancelled
-                    // If cancelled, and they were in a state of no filters, nothing changes.
-                    // If they had filters and cancelled, the old state remains.
-                    // applyManualRegexStringEffect(null) would clear all, which might not be desired on cancel.
-                    // So, we only dispatch if a result was given.
-                    // However, if the intent of "cancel" is to ensure no filter is active from *this* prompt:
-                    // cm.dispatch({ effects: applyManualRegexStringEffect.of(null) }); // This would clear all
-                    // For now, let's assume cancel means "don't change current filter state from this prompt"
-                    new Notice('Regex filter input cancelled.');
+                } else if (result === "" || result === null) { // User submitted empty or cancelled
+                    // If user explicitly submitted empty string from modal, or cancelled,
+                    // and the intent of this prompt is to set a new *single* filter or clear,
+                    // then clearing is appropriate.
+                    // If filters were already active, toggleGlobalFilter would have cleared them.
+                    // If no filters were active, and user cancels/empties, state remains no filters.
+                    if (result === "") { // Explicit empty submission
+                         cm.dispatch({ effects: applyManualRegexStringEffect.of(null) });
+                         this.updateBodyClassForActiveLeaf();
+                         new Notice('Regex filter cleared by empty input.');
+                    } else { // Cancelled (result is null)
+                        new Notice('Regex filter input cancelled.');
+                    }
                     // No change to body class or filter state if cancelled unless explicitly cleared
                 }
             }
