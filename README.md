@@ -22,6 +22,8 @@ The plugin allows users to filter the active editor view in Obsidian so that onl
     
 - **Hotkey Assignable Custom Filters:** Create custom filters and assign individual hotkeys to them. Toggling multiple custom filters will allow for incremental additive/subtractive filter output.
 
+- **Child indents:** Child indents will be included in an active filter by default. This behaviour can be disabled in plugin settings if desired.
+
 ##### Known Limitations:
 
 - **Copying filtered text:** Highlighting and copying filtered lines will implicitly copy all the lines that are filtered between the beginnning and end of the highlighted text.
@@ -38,3 +40,6 @@ The plugin allows users to filter the active editor view in Obsidian so that onl
 
 **License:**
 Apache 2.0
+
+#### Coffee?:
+[https://coff.ee/64mm4kn1f3](/images/coffee.png)
