@@ -20,11 +20,11 @@ The plugin allows users to filter the active editor view in Obsidian so that onl
     
 - **Visual Indicator:** Adds a subtle darkening effect (inset box-shadow) to the editor margins when the filter is active, providing clear visual feedback.
     
-- **Implementation:** Uses CodeMirror 6 decorations (display: none) to hide non-matching lines without modifying the underlying file structure directly (until edits are made).
+- **Hotkey Assignable Custom Filters:** Create custom filters and assign individual hotkeys to them. Toggling multiple custom filters will allow for incremental additive/subtractive filter output.
 
 ##### Known Limitations:
 
-- **Folded text:** Matched lines within folded blocks of text will not be included in the filter.
+- **Copying filtered text:** Highlighting and copying filtered lines will implicitly copy all the lines that are filtered between the beginnning and end of the highlighted text.
 
 #### How To:
 ![image](/images/regex-line-filter.gif)
@@ -32,5 +32,9 @@ The plugin allows users to filter the active editor view in Obsidian so that onl
 *Demo showing a number of regex filters used with the plugin assigned to a HotKey.*
 
 
+**Thank You:**
+- To **SkepticMystic** for the inspiration for saveable individual filters in your **Advanced Cursors** plugin.
+- To **FelipeRearden** for the above enhancement suggestion!
+
 **License:**
-GNU GPLv3
+Apache 2.0
