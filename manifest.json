@@ -1,7 +1,7 @@
 {
 	"id": "regex-line-filter",
 	"name": "Regex Line Filter",
-	"version": "0.1.1",
+	"version": "0.1.2",
 	"minAppVersion": "0.15.0",
 	"description": "Filters the active note to show only lines matching a regex, allowing edits.",
 	"author": "64MM4.KN1F3",
