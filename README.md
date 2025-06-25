@@ -42,4 +42,4 @@ The plugin allows users to filter the active editor view in Obsidian so that onl
 Apache 2.0
 
 #### Coffee?:
-[https://coff.ee/64mm4kn1f3](/images/coffee.png)
+[![👋](/images/coffee.png)](https://coff.ee/64mm4kn1f3)
