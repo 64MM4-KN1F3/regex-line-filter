@@ -41,4 +41,4 @@ The plugin allows users to filter the active editor view in Obsidian so that onl
 **License:**
 Apache 2.0
 
-<a href="https://coff.ee/64mm4kn1f3"><img src="/images/coffee.png" align="left" width="33%" height="33%" ></a>
+<a href="https://coff.ee/64mm4kn1f3"><img src="/images/coffee.png" align="left" width="13%" height="13%" ></a>
