@@ -178,3 +178,21 @@ body.regex-filter-active-body .workspace-leaf.mod-active .view-content::after {
 .saved-regex-item .setting-item-control .clickable-icon:first-child {
   margin-left: 0;
 }
+.saved-regex-text-container {
+    flex-grow: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+}
+
+.saved-regex-name {
+    font-weight: bold;
+    font-size: var(--font-ui-normal);
+    color: var(--text-normal);
+}
+
+.saved-regex-subtext {
+    font-size: var(--font-ui-smaller);
+    color: var(--text-muted);
+    font-family: var(--font-monospace);
+}

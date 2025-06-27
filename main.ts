@@ -9,6 +9,7 @@ const ACTIVE_FILTER_BODY_CLASS = 'regex-filter-active-body';
 // --- Settings ---
 export interface SavedRegexItem {
   id: string;
+  name?: string; // Optional name for the regex
   regex: string;
 }
 
@@ -17,6 +18,7 @@ interface RegexLineFilterSettings {
   includeChildItems: boolean;
   regexHistory: string[];
   savedRegexes: SavedRegexItem[];
+  activeFilters: string[];
 }
 
 const DEFAULT_SETTINGS: RegexLineFilterSettings = {
@@ -24,6 +26,7 @@ const DEFAULT_SETTINGS: RegexLineFilterSettings = {
   includeChildItems: true,
   regexHistory: [],
   savedRegexes: [],
+  activeFilters: [],
 }
 
 // --- Helper to build combined regex ---
@@ -60,81 +63,6 @@ const clearAllRegexesEffect = StateEffect.define<void>();                 // Cle
 const setHideEmptyLinesEffect = StateEffect.define<boolean>();
 const setIncludeChildItemsEffect = StateEffect.define<boolean>();
 
-// --- ViewPlugin definition ---
-const filterViewPlugin = ViewPlugin.fromClass(
-class {
-decorations: DecorationSet;
-constructor(view: EditorView) { this.decorations = this.buildDecorations(view); }
-
-update(update: ViewUpdate) {
-  if (update.docChanged || update.viewportChanged || update.state.field(filterStateField) !== update.startState.field(filterStateField)) {
-    this.decorations = this.buildDecorations(update.view);
-  }
-}
-
-buildDecorations(view: EditorView): DecorationSet {
-  const builder = new RangeSetBuilder<Decoration>();
-  const { combinedRegex, enabled, hideEmptyLines, includeChildItems } = view.state.field(filterStateField);
-
-  if (!enabled || !combinedRegex) {
-    return builder.finish();
-  }
-
-const doc = view.state.doc;
-const isVisible = new Array(doc.lines + 1).fill(false);
-const getIndentLevel = (text: string): number => {
-  const match = text.match(/^(\s*)/);
-  return match ? match[1].length : 0;
-};
-try {
-for (let i = 1; i <= doc.lines; i++) {
-  const line = doc.line(i);
-  if (combinedRegex.test(line.text)) {
-
-    isVisible[i] = true;
-    if (includeChildItems) {
-      const parentIndent = getIndentLevel(line.text);
-      for (let j = i + 1; j <= doc.lines; j++) {
-
-        const childLine = doc.line(j);
-        const childIndent = getIndentLevel(childLine.text);
-        if (childIndent > parentIndent) { isVisible[j] = true; }
-
-        else { break; }
-      }
-
-    }
-  }
-}
-for (let i = 1; i <= doc.lines; i++) {
-
-const line = doc.line(i);
-const isEmpty = line.text.trim().length === 0;
-let shouldHide = !isVisible[i];
-if (isEmpty && !hideEmptyLines) {
-    shouldHide = false;
-}
-
-if (shouldHide) {
-
-builder.add(line.from, line.from, Decoration.line({ attributes: { class: 'regex-filter-hidden-line' } }));
-                    }
-
-                }
-
-            } catch (e) {
-
-console.error("Regex Line Filter: Error during decoration build:", e);
-            }
-
-return builder.finish();
-        }
-
-    },
-
-    { decorations: (v) => v.decorations, }
-
-);
 
 
 
@@ -243,6 +171,90 @@ cssStyleEl: HTMLElement | null = null;
 
 
 
+private createFilterViewPlugin() {
+    const plugin = this;
+    return ViewPlugin.fromClass(
+        class {
+            decorations: DecorationSet;
+
+            constructor(view: EditorView) {
+                this.decorations = this.buildDecorations(view);
+            }
+
+            update(update: ViewUpdate) {
+                const oldState = update.startState.field(filterStateField, false);
+                const newState = update.state.field(filterStateField, false);
+
+                if (oldState && newState && JSON.stringify(oldState.activeRegexStrings) !== JSON.stringify(newState.activeRegexStrings)) {
+                    plugin.setAndSaveActiveFilters(newState.activeRegexStrings);
+                }
+
+                if (update.docChanged || update.viewportChanged || update.state.field(filterStateField) !== update.startState.field(filterStateField)) {
+                    this.decorations = this.buildDecorations(update.view);
+                }
+            }
+
+            buildDecorations(view: EditorView): DecorationSet {
+                const builder = new RangeSetBuilder<Decoration>();
+                const { combinedRegex, enabled, hideEmptyLines, includeChildItems } = view.state.field(filterStateField);
+
+                if (!enabled || !combinedRegex) {
+                    return builder.finish();
+                }
+
+                const doc = view.state.doc;
+                const isVisible = new Array(doc.lines + 1).fill(false);
+                const getIndentLevel = (text: string): number => {
+                    const match = text.match(/^(\s*)/);
+                    return match ? match[1].length : 0;
+                };
+
+                try {
+                    for (let i = 1; i <= doc.lines; i++) {
+                        const line = doc.line(i);
+                        if (combinedRegex.test(line.text)) {
+                            isVisible[i] = true;
+                            if (includeChildItems) {
+                                const parentIndent = getIndentLevel(line.text);
+                                for (let j = i + 1; j <= doc.lines; j++) {
+                                    const childLine = doc.line(j);
+                                    const childIndent = getIndentLevel(childLine.text);
+                                    if (childIndent > parentIndent) {
+                                        isVisible[j] = true;
+                                    } else {
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    for (let i = 1; i <= doc.lines; i++) {
+                        const line = doc.line(i);
+                        const isEmpty = line.text.trim().length === 0;
+                        let shouldHide = !isVisible[i];
+
+                        if (isEmpty && !hideEmptyLines) {
+                            shouldHide = false;
+                        }
+
+                        if (shouldHide) {
+                            builder.add(line.from, line.from, Decoration.line({ attributes: { class: 'regex-filter-hidden-line' } }));
+                        }
+                    }
+                } catch (e) {
+                    console.error("Regex Line Filter: Error during decoration build:", e);
+                }
+
+                return builder.finish();
+            }
+        },
+        {
+            decorations: (v) => v.decorations,
+        }
+    );
+}
+
 async onload() {
 
 console.log('Loading Regex Line Filter plugin');
@@ -274,11 +286,11 @@ this.registerEditorExtension([
 
 filterStateField.init((editorState: EditorState) => ({ // Use .init for initial state per-editor
 
-activeRegexStrings: [], // Start with no active regexes
+activeRegexStrings: this.settings.activeFilters || [], // Start with saved filters
 
-combinedRegex: null,
+combinedRegex: buildCombinedRegex(this.settings.activeFilters || []),
 
-enabled: false,
+enabled: (this.settings.activeFilters || []).length > 0,
 
 hideEmptyLines: this.settings.hideEmptyLines,
 
@@ -286,7 +298,7 @@ includeChildItems: this.settings.includeChildItems,
 
             })),
 
-filterViewPlugin
+this.createFilterViewPlugin()
 
         ]);
 
@@ -299,6 +311,7 @@ this.dispatchHideEmptyLinesToEditors(this.settings.hideEmptyLines);
 this.dispatchIncludeChildItemsToEditors(this.settings.includeChildItems);
 this.updateBodyClassForActiveLeaf();
         });
+this.updateBodyClassForActiveLeaf();
     }
 
 
@@ -351,6 +364,7 @@ async loadSettings() {
 this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
 this.settings.regexHistory = (this.settings.regexHistory || []).slice(0, REGEX_HISTORY_LIMIT);
 this.settings.savedRegexes = this.settings.savedRegexes || [];
+this.settings.activeFilters = this.settings.activeFilters || [];
 if (typeof this.settings.includeChildItems !== 'boolean') {
 
 this.settings.includeChildItems = DEFAULT_SETTINGS.includeChildItems;
@@ -369,7 +383,12 @@ this.settings.hideEmptyLines = DEFAULT_SETTINGS.hideEmptyLines;
 async saveSettings() {
 
 await this.saveData(this.settings);
-    }
+}
+
+setAndSaveActiveFilters(activeFilters: string[]) {
+  this.settings.activeFilters = activeFilters;
+  this.saveSettings();
+}
 
 
 
@@ -582,25 +601,27 @@ registerAllToggleSavedRegexCommands() {
 
 
 registerToggleCommandForSavedRegex(item: SavedRegexItem) {
+    const commandId = `toggle-saved-regex-${item.id}`;
+    const fullCommandId = `${this.manifest.id}:${commandId}`;
 
-const commandId = `toggle-saved-regex-${item.id}`;
-// @ts-ignore
-
-if (this.app.commands.commands[`${this.manifest.id}:${commandId}`]) return; // Avoid re-registering
-
-this.addCommand({
-
-id: commandId,
-
-name: `Toggle Filter: /${this.truncateRegex(item.regex)}/`,
-
-editorCallback: (editor: Editor, view: MarkdownView) => {
-
-this.toggleSpecificSavedRegex(item.regex, editor, view);
-            }
-
-        });
+    // If command exists, remove it before re-adding to ensure the name is updated.
+    // @ts-ignore
+    if (this.app.commands.commands[fullCommandId]) {
+        this.unregisterCommandForSavedRegex(item.id);
     }
+
+    const commandName = (item.name && item.name.trim() !== "")
+        ? `Toggle Filter: ${item.name}`
+        : `Toggle Filter: /${this.truncateRegex(item.regex)}/`;
+
+    this.addCommand({
+        id: commandId,
+        name: commandName,
+        editorCallback: (editor: Editor, view: MarkdownView) => {
+            this.toggleSpecificSavedRegex(item.regex, editor, view);
+        }
+    });
+}
 
 
 
@@ -710,9 +731,20 @@ const listEl = container.createDiv({ cls: 'saved-regex-items-wrapper' });
 savedRegexes.forEach((savedRegexItem, index) => {
 
 const itemDiv = listEl.createDiv({ cls: 'saved-regex-item' });
-const textSpan = itemDiv.createSpan({ cls: 'saved-regex-text' });
-textSpan.setText(`/${savedRegexItem.regex}/`);
-textSpan.setAttr('title', savedRegexItem.regex);
+const textDiv = itemDiv.createDiv({ cls: 'saved-regex-text-container' });
+
+// Display name if it exists, otherwise show the regex
+const displayName = (savedRegexItem.name && savedRegexItem.name.trim() !== "")
+    ? savedRegexItem.name
+    : `/${savedRegexItem.regex}/`;
+const subText = (savedRegexItem.name && savedRegexItem.name.trim() !== "")
+    ? `/${savedRegexItem.regex}/`
+    : "";
+
+textDiv.createEl('div', { text: displayName, cls: 'saved-regex-name' });
+if (subText) {
+    textDiv.createEl('div', { text: subText, cls: 'saved-regex-subtext' });
+}
 const controlsDiv = itemDiv.createDiv({ cls: 'saved-regex-item-controls' });
 const settingControl = new Setting(controlsDiv);
 settingControl.settingEl.style.border = 'none'; settingControl.settingEl.style.padding = '0';
@@ -859,60 +891,98 @@ onClose() { this.contentEl.empty(); }
 class AddSavedRegexModal extends Modal {
 
 plugin: RegexLineFilterPlugin; settingsTab: RegexLineFilterSettingTab; existingItem: SavedRegexItem | null;
-itemIndex: number; currentRegexText: string; inputEl: HTMLInputElement;
-constructor(app: App, plugin: RegexLineFilterPlugin, settingsTab: RegexLineFilterSettingTab, existingItemToEdit: SavedRegexItem | null, itemIndex: number) {
+itemIndex: number;
+currentRegexText: string;
+currentNameText: string;
+nameInputEl: HTMLInputElement;
+regexInputEl: HTMLInputElement;
 
-super(app); this.plugin = plugin; this.settingsTab = settingsTab; this.existingItem = existingItemToEdit;
-this.itemIndex = itemIndex; this.currentRegexText = existingItemToEdit ? existingItemToEdit.regex : "";
-    }
+constructor(app: App, plugin: RegexLineFilterPlugin, settingsTab: RegexLineFilterSettingTab, existingItemToEdit: SavedRegexItem | null, itemIndex: number) {
+    super(app);
+    this.plugin = plugin;
+    this.settingsTab = settingsTab;
+    this.existingItem = existingItemToEdit;
+    this.itemIndex = itemIndex;
+    this.currentRegexText = existingItemToEdit ? existingItemToEdit.regex : "";
+    this.currentNameText = existingItemToEdit ? (existingItemToEdit.name || "") : "";
+}
 
 onOpen() {
+    const { contentEl } = this;
+    contentEl.empty();
+    contentEl.createEl('h2', { text: this.existingItem ? 'Edit Saved Filter' : 'Add New Saved Filter' });
 
-const { contentEl } = this; contentEl.empty();
-contentEl.createEl('h2', { text: this.existingItem ? 'Edit Saved Regex' : 'Add New Saved Regex' });
-new Setting(contentEl).setName('Regular expression:').setDesc('Enter the regex string. It will be compiled with the \'u\' (unicode) flag.')
+    // Name Input
+    new Setting(contentEl)
+        .setName('Filter name (optional)')
+        .setDesc('A friendly name for this filter, used in the command palette.')
+        .addText(text => {
+            this.nameInputEl = text.inputEl;
+            text.setValue(this.currentNameText)
+                .setPlaceholder('e.g., My Custom To-Do Filter')
+                .onChange(value => this.currentNameText = value);
+            this.nameInputEl.style.width = '100%';
+        });
 
-            .addText(text => {
-
-this.inputEl = text.inputEl;
-text.setValue(this.currentRegexText).setPlaceholder('e.g., ^\\s*- \\[ \\]').onChange(value => this.currentRegexText = value);
-text.inputEl.style.width = '100%';
-text.inputEl.addEventListener('keydown', (e: KeyboardEvent) => { if (e.key==='Enter'&&!e.shiftKey&&!e.ctrlKey&&!e.metaKey&&!e.altKey) {e.preventDefault();this.doSubmit();}});
+    // Regex Input
+    new Setting(contentEl)
+        .setName('Regular expression')
+        .setDesc("Enter the regex string. It will be compiled with the 'u' (unicode) flag.")
+        .addText(text => {
+            this.regexInputEl = text.inputEl;
+            text.setValue(this.currentRegexText)
+                .setPlaceholder('e.g., ^\\s*- \\[ \\]')
+                .onChange(value => this.currentRegexText = value);
+            this.regexInputEl.style.width = '100%';
+            this.regexInputEl.addEventListener('keydown', (e: KeyboardEvent) => {
+                if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+                    e.preventDefault();
+                    this.doSubmit();
+                }
             });
-this.inputEl.focus(); this.inputEl.select();
-new Setting(contentEl)
+        });
 
-            .addButton(button => button.setButtonText(this.existingItem ? 'Save Changes' : 'Save Regex').setCta().onClick(() => this.doSubmit()))
+    this.nameInputEl.focus();
 
-            .addButton(button => button.setButtonText('Cancel').onClick(() => this.close()));
-    }
+    // Buttons
+    new Setting(contentEl)
+        .addButton(button => button.setButtonText(this.existingItem ? 'Save Changes' : 'Save Filter').setCta().onClick(() => this.doSubmit()))
+        .addButton(button => button.setButtonText('Cancel').onClick(() => this.close()));
+}
 
 async doSubmit() {
+    const trimmedRegex = this.currentRegexText.trim();
+    const trimmedName = this.currentNameText.trim();
 
-const trimmedRegex = this.currentRegexText.trim();
-if (trimmedRegex === "") { new Notice("Regex cannot be empty."); this.inputEl.focus(); return; }
-try { new RegExp(trimmedRegex, 'u'); } catch (e) { new Notice(`Invalid regex: ${(e as Error).message}`); this.inputEl.focus(); return; }
+    if (trimmedRegex === "") {
+        new Notice("Regex cannot be empty.");
+        this.regexInputEl.focus();
+        return;
+    }
+    try {
+        new RegExp(trimmedRegex, 'u');
+    } catch (e) {
+        new Notice(`Invalid regex: ${(e as Error).message}`);
+        this.regexInputEl.focus();
+        return;
+    }
 
-const savedRegexes = this.plugin.settings.savedRegexes || [];
-let isNew = true;
+    const savedRegexes = this.plugin.settings.savedRegexes || [];
+    let isNew = true;
+    let changesMade = false;
 
+    if (this.itemIndex >= 0 && this.itemIndex < savedRegexes.length && this.existingItem) { // Editing
+        isNew = false;
+        const itemToUpdate = savedRegexes[this.itemIndex];
+        const oldRegexString = itemToUpdate.regex;
+        const oldNameString = itemToUpdate.name || "";
 
-
-if (this.itemIndex >= 0 && this.itemIndex < savedRegexes.length && this.existingItem) { // Editing
-
-isNew = false;
-const itemToUpdate = savedRegexes[this.itemIndex];
-const oldRegexString = itemToUpdate.regex;
-
-
-
-if (oldRegexString !== trimmedRegex) {
-
-// If regex string changes, unregister old command, update, register new
-
-this.plugin.unregisterCommandForSavedRegex(itemToUpdate.id);
-// If the old regex was active, remove it from active filters in all editors
-
+        if (oldRegexString !== trimmedRegex || oldNameString !== trimmedName) {
+            changesMade = true;
+            if (oldRegexString !== trimmedRegex) {
+                // If regex string changes, unregister old command, update, register new
+                this.plugin.unregisterCommandForSavedRegex(itemToUpdate.id);
+                // If the old regex was active, remove it from active filters in all editors
                 this.app.workspace.iterateAllLeaves(leaf => {
                     if (leaf.view instanceof MarkdownView) {
                         const cm = (leaf.view.editor as any).cm as EditorView;
@@ -925,33 +995,35 @@ this.plugin.unregisterCommandForSavedRegex(itemToUpdate.id);
                         }
                     }
                 });
-
-
-
-itemToUpdate.regex = trimmedRegex;
-this.plugin.registerToggleCommandForSavedRegex(itemToUpdate); // Register with new (or same) regex text
-
-new Notice('Saved regex updated!');
-            } else {
-
-new Notice('No changes made to the regex.');
-this.close(); return;
             }
-
-        } else { // Adding new item
-const newItem: SavedRegexItem = { id: Date.now().toString(36) + Math.random().toString(36).substring(2, 9), regex: trimmedRegex };
-savedRegexes.push(newItem);
-this.plugin.registerToggleCommandForSavedRegex(newItem);
-new Notice('New regex saved!');
+            itemToUpdate.regex = trimmedRegex;
+            itemToUpdate.name = trimmedName;
+            this.plugin.registerToggleCommandForSavedRegex(itemToUpdate); // Re-register to update name if changed
+            new Notice('Saved filter updated!');
         }
-
-this.plugin.settings.savedRegexes = savedRegexes;
-await this.plugin.saveSettings();
-this.settingsTab.initExistingSavedRegexes(this.settingsTab.savedRegexesDiv);
-if (!isNew) this.plugin.updateBodyClassForActiveLeaf(); // Update if an active filter might have changed
-
-this.close();
+    } else { // Adding new item
+        changesMade = true;
+        const newItem: SavedRegexItem = {
+            id: Date.now().toString(36) + Math.random().toString(36).substring(2, 9),
+            name: trimmedName,
+            regex: trimmedRegex
+        };
+        savedRegexes.push(newItem);
+        this.plugin.registerToggleCommandForSavedRegex(newItem);
+        new Notice('New filter saved!');
     }
+
+    if (changesMade) {
+        this.plugin.settings.savedRegexes = savedRegexes;
+        await this.plugin.saveSettings();
+        this.settingsTab.initExistingSavedRegexes(this.settingsTab.savedRegexesDiv);
+        if (!isNew) this.plugin.updateBodyClassForActiveLeaf();
+    } else {
+        new Notice('No changes were made.');
+    }
+
+    this.close();
+}
 
 onClose() { this.contentEl.empty(); }
 
