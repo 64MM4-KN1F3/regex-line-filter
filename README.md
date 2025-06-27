@@ -6,6 +6,8 @@ The plugin allows users to filter the active editor view in Obsidian so that onl
 
 #### Key Features:
 
+- **Template Variables**: Use dynamic variables in your filters, such as `{{title}}` for the current note's title and `{{date:YYYY-MM-DD}}` for the current date (custom date formats from Moment.js are supported).
+
 - **Regex Filtering:** Filters the current note based on a JavaScript-compatible regex (including emoji support).
     
 - **Live Editing:** Allows editing of the filtered (visible) lines directly. Edits are saved to the actual note.
