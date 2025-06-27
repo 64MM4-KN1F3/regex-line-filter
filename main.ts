@@ -111,7 +111,9 @@ for (let i = 1; i <= doc.lines; i++) {
 const line = doc.line(i);
 const isEmpty = line.text.trim().length === 0;
 let shouldHide = !isVisible[i];
-if (hideEmptyLines && isEmpty) { shouldHide = true; }
+if (isEmpty && !hideEmptyLines) {
+    shouldHide = false;
+}
 
 if (shouldHide) {
 
