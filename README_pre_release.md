@@ -1,10 +1,25 @@
 ## Regex Line Filter plugin for Obsidian
-![image](/images/logo_05.png)
+<div style="text-align: center;">
+  <img id="random-logo" width="128" height="128">
+</div>
+<script>
+  (function() {
+    const imageIndex = Math.floor(Math.random() * 28);
+    const paddedIndex = imageIndex.toString().padStart(2, '0');
+    const logo = document.getElementById('random-logo');
+    if(logo) {
+      logo.src = `images/logo_${paddedIndex}.png`;
+      logo.alt = 'logo';
+    }
+  })();
+</script>
 
 #### Purpose:
 The plugin allows users to filter the active editor view in Obsidian so that only lines matching a user-supplied regular expression are displayed. Users can edit these visible lines. Toggling the filter off restores the full view of the note with the edits preserved. Toggling it back on re-prompts for a regex (pre-filled with the last used one).
 
 #### Key Features:
+
+- **Template Variables**: Use dynamic variables in your filters, such as `{{title}}` for the current note's title and `{{date:YYYY-MM-DD}}` for the current date (custom date formats from Moment.js are supported).
 
 - **Regex Filtering:** Filters the current note based on a JavaScript-compatible regex (including emoji support).
     
