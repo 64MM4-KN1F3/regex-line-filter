@@ -993,8 +993,6 @@ createHistoryItem(container: HTMLElement, regexString: string, isPinned: boolean
         });
     }
 }
-
-
 }
 
 
