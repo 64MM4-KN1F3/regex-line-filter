@@ -58,6 +58,15 @@ body.regex-filter-active-body .workspace-leaf.mod-active .view-content::after {
     opacity: 1; /* Fade in */
 }
 
+/* --- Note Title Fading --- */
+.inline-title {
+    transition: opacity var(--regex-filter-transition-duration) ease-in-out;
+}
+
+body.regex-filter-fade-title .inline-title {
+    opacity: var(--regex-filter-title-fade-opacity, 0.3);
+}
+
 
 /* --- Modal Styles (RegexInputModal & AddSavedRegexModal) --- */
 

@@ -6,6 +6,7 @@ import { Decoration, DecorationSet, EditorView, ViewPlugin, ViewUpdate } from '@
 // --- Constants ---
 const REGEX_HISTORY_LIMIT = 5;
 const ACTIVE_FILTER_BODY_CLASS = 'regex-filter-active-body';
+const FADE_TITLE_BODY_CLASS = 'regex-filter-fade-title';
 
 // --- Settings ---
 export interface SavedRegexItem {
@@ -18,6 +19,8 @@ export interface SavedRegexItem {
 interface RegexLineFilterSettings {
   hideEmptyLines: boolean;
   includeChildItems: boolean;
+  enableTemplateVariables: boolean;
+  fadeNoteTitleOpacity: number;
   regexHistory: string[];
   savedRegexes: SavedRegexItem[];
   // activeFilters: string[]; // This will no longer be stored in settings
@@ -26,6 +29,8 @@ interface RegexLineFilterSettings {
 const DEFAULT_SETTINGS: RegexLineFilterSettings = {
   hideEmptyLines: true,
   includeChildItems: true,
+  enableTemplateVariables: false,
+  fadeNoteTitleOpacity: 1.0,
   regexHistory: [],
   savedRegexes: [],
   // activeFilters: [], // This is now managed per-editor instance
@@ -52,10 +57,7 @@ function buildCombinedRegex(regexStrings: string[]): RegExp | null {
 
 // --- State & Effects ---
 interface FilterState {
-  activeRegexStrings: string[]; // Stores the RESOLVED strings of active regexes
   unresolvedRegexStrings: string[]; // Stores the original, UNRESOLVED strings
-  combinedRegex: RegExp | null;  // The single RegExp object used for filtering (ORed strings)
-  enabled: boolean;              // True if unresolvedRegexStrings.length > 0 and combinedRegex is valid
   hideEmptyLines: boolean;
   includeChildItems: boolean;
 }
@@ -74,91 +76,38 @@ const setIncludeChildItemsEffect = StateEffect.define<boolean>();
 const filterStateField = StateField.define<FilterState>({
 
 create(editorState: EditorState): FilterState {
-// Initial state values will be set by .init() in plugin.onload
-return {
-
-activeRegexStrings: [],
-unresolvedRegexStrings: [],
-
-combinedRegex: null,
-
-enabled: false,
-
-hideEmptyLines: DEFAULT_SETTINGS.hideEmptyLines, // Fallback, should be overridden by .init
-
-includeChildItems: DEFAULT_SETTINGS.includeChildItems, // Fallback
-
+        // Initial state values will be set by .init() in plugin.onload
+        return {
+            unresolvedRegexStrings: [],
+            hideEmptyLines: DEFAULT_SETTINGS.hideEmptyLines, // Fallback, should be overridden by .init
+            includeChildItems: DEFAULT_SETTINGS.includeChildItems, // Fallback
         };
     },
 
 update(value, tr): FilterState {
-let newUnresolvedStrings = [...value.unresolvedRegexStrings];
-let needsRebuild = false; // Flag to rebuild combinedRegex
-
-
-
-
-for (let effect of tr.effects) {
-
-if (effect.is(toggleSpecificRegexStringEffect)) {
-
-const str = effect.value;
-const index = newUnresolvedStrings.indexOf(str);
-if (index > -1) { newUnresolvedStrings.splice(index, 1); }
-
-else { newUnresolvedStrings.push(str); }
-
-needsRebuild = true;
+        let newState = { ...value };
+        for (let effect of tr.effects) {
+            if (effect.is(toggleSpecificRegexStringEffect)) {
+                const str = effect.value;
+                const index = newState.unresolvedRegexStrings.indexOf(str);
+                let newStrings = [...newState.unresolvedRegexStrings];
+                if (index > -1) {
+                    newStrings.splice(index, 1);
+                } else {
+                    newStrings.push(str);
+                }
+                newState.unresolvedRegexStrings = newStrings;
+            } else if (effect.is(applyManualRegexStringEffect)) {
+                newState.unresolvedRegexStrings = effect.value === null ? [] : [effect.value];
+            } else if (effect.is(clearAllRegexesEffect)) {
+                newState.unresolvedRegexStrings = [];
+            } else if (effect.is(setHideEmptyLinesEffect)) {
+                newState.hideEmptyLines = effect.value;
+            } else if (effect.is(setIncludeChildItemsEffect)) {
+                newState.includeChildItems = effect.value;
             }
-
-if (effect.is(applyManualRegexStringEffect)) {
-if (effect.value === null) { newUnresolvedStrings = []; }
-
-else { newUnresolvedStrings = [effect.value]; } // Manual input replaces all others
-
-needsRebuild = true;
-            }
-
-if (effect.is(clearAllRegexesEffect)) {
-
-newUnresolvedStrings = [];
-needsRebuild = true;
-            }
-
         }
-
-
-
-
-// For now, we'll just copy unresolved to active. Resolution will happen in the view plugin.
-let newState = { ...value, unresolvedRegexStrings: newUnresolvedStrings, activeRegexStrings: newUnresolvedStrings };
-
-if (needsRebuild) {
-    // We build the regex from the active (potentially resolved) strings.
-    // The actual resolution will happen inside the view plugin before building decorations.
-    newState.combinedRegex = buildCombinedRegex(newState.activeRegexStrings);
-    newState.enabled = newState.unresolvedRegexStrings.length > 0 && newState.combinedRegex !== null;
-}
-
-
-
-
-// Handle other effects after regex state is potentially updated
-for (let effect of tr.effects) {
-
-if (effect.is(setHideEmptyLinesEffect)) {
-
-newState.hideEmptyLines = effect.value;
-            }
-
-if (effect.is(setIncludeChildItemsEffect)) {
-
-newState.includeChildItems = effect.value;
-            }
-
-        }
-
-return newState;
+        return newState;
     },
 
 });
@@ -188,30 +137,31 @@ private createFilterViewPlugin() {
             }
 
             update(update: ViewUpdate) {
-                const oldState = update.startState.field(filterStateField, false);
-                const newState = update.state.field(filterStateField, false);
-
-                // The logic to save active filters globally has been removed.
-                // if (oldState && newState && JSON.stringify(oldState.unresolvedRegexStrings) !== JSON.stringify(newState.unresolvedRegexStrings)) {
-                //     plugin.setAndSaveActiveFilters(newState.unresolvedRegexStrings);
-                // }
-
-                if (update.docChanged || update.viewportChanged || update.state.field(filterStateField) !== update.startState.field(filterStateField)) {
+                const stateChanged = update.state.field(filterStateField) !== update.startState.field(filterStateField);
+                if (update.docChanged || update.viewportChanged || stateChanged) {
+                    // If the state changed, we might need to re-resolve dynamic templates
+                    if (stateChanged && plugin.settings.enableTemplateVariables) {
+                        // This logic is now simplified. Resolution happens on activation.
+                        // This update just rebuilds decorations.
+                    }
                     this.decorations = this.buildDecorations(update.view);
                 }
             }
 
             buildDecorations(view: EditorView): DecorationSet {
                 const builder = new RangeSetBuilder<Decoration>();
-                const { unresolvedRegexStrings, enabled, hideEmptyLines, includeChildItems } = view.state.field(filterStateField);
-                const activeFile = plugin.app.workspace.getActiveFile();
+                const { unresolvedRegexStrings, hideEmptyLines, includeChildItems } = view.state.field(filterStateField);
+                const enabled = unresolvedRegexStrings.length > 0;
 
-                if (!enabled || !activeFile) {
+                if (!enabled) {
                     return builder.finish();
                 }
 
                 // Resolve templates and build the combined regex
-                const resolvedRegexStrings = unresolvedRegexStrings.map(s => Templater.resolve(s, activeFile));
+                const resolvedRegexStrings = plugin.settings.enableTemplateVariables
+                    ? unresolvedRegexStrings.map(s => Templater.resolve(s))
+                    : unresolvedRegexStrings;
+
                 const combinedRegex = buildCombinedRegex(resolvedRegexStrings);
 
                 if (!combinedRegex) {
@@ -299,19 +249,13 @@ this.addSettingTab(new RegexLineFilterSettingTab(this.app, this));
 
 
 this.registerEditorExtension([
-
-filterStateField.init((editorState: EditorState) => ({ // Use .init for initial state per-editor
-  unresolvedRegexStrings: [], // Start with no active filters
-  activeRegexStrings: [],     // Start with no active filters
-  combinedRegex: null,        // No regex to start
-  enabled: false,             // Disabled by default
-  hideEmptyLines: this.settings.hideEmptyLines,
-  includeChildItems: this.settings.includeChildItems,
-})),
-
-this.createFilterViewPlugin()
-
-        ]);
+    filterStateField.init((editorState: EditorState) => ({
+        unresolvedRegexStrings: [],
+        hideEmptyLines: this.settings.hideEmptyLines,
+        includeChildItems: this.settings.includeChildItems,
+    })),
+    this.createFilterViewPlugin()
+]);
 
 
 
@@ -338,24 +282,47 @@ this.removeCssVariables();
 
 
 private handleActiveLeafChange = (leaf: WorkspaceLeaf | null): void => {
+        let filterIsEnabledOnActiveLeaf = false;
+        let shouldFadeTitle = false;
 
-let filterIsEnabledOnActiveLeaf = false;
-if (leaf && leaf.view instanceof MarkdownView) {
-const cm = (leaf.view.editor as { cm?: EditorView })?.cm;
-if (cm && cm.state && typeof cm.state.field === 'function') {
-const fieldState = cm.state.field(filterStateField, false); // Don't error if not found
+        if (leaf && leaf.view instanceof MarkdownView) {
+            const cm = (leaf.view.editor as { cm?: EditorView })?.cm;
+            if (cm && cm.state && typeof cm.state.field === 'function') {
+                const fieldState = cm.state.field(filterStateField, false);
+                if (fieldState && fieldState.unresolvedRegexStrings.length > 0) {
+                    filterIsEnabledOnActiveLeaf = true;
 
-if (fieldState) {
-
-filterIsEnabledOnActiveLeaf = fieldState.enabled;
+                    if (this.settings.fadeNoteTitleOpacity < 1.0) {
+                        const activeFile = this.app.workspace.getActiveFile();
+                        if (activeFile) {
+                            const title = activeFile.basename;
+                            const resolvedRegexStrings = this.settings.enableTemplateVariables
+                                ? fieldState.unresolvedRegexStrings.map(s => Templater.resolve(s))
+                                : fieldState.unresolvedRegexStrings;
+                            
+                            const combinedRegex = buildCombinedRegex(resolvedRegexStrings);
+                            if (combinedRegex && !combinedRegex.test(title)) {
+                                shouldFadeTitle = true;
+                            }
+                        }
+                    }
                 }
-
             }
-
         }
 
-if (filterIsEnabledOnActiveLeaf) document.body.classList.add(ACTIVE_FILTER_BODY_CLASS);
-else document.body.classList.remove(ACTIVE_FILTER_BODY_CLASS);
+        // Handle main body class for vignette
+        if (filterIsEnabledOnActiveLeaf) {
+            document.body.classList.add(ACTIVE_FILTER_BODY_CLASS);
+        } else {
+            document.body.classList.remove(ACTIVE_FILTER_BODY_CLASS);
+        }
+
+        // Handle title fade class
+        if (shouldFadeTitle) {
+            document.body.classList.add(FADE_TITLE_BODY_CLASS);
+        } else {
+            document.body.classList.remove(FADE_TITLE_BODY_CLASS);
+        }
     }
 
 
@@ -384,6 +351,12 @@ this.settings.includeChildItems = DEFAULT_SETTINGS.includeChildItems;
 if (typeof this.settings.hideEmptyLines !== 'boolean') {
 
 this.settings.hideEmptyLines = DEFAULT_SETTINGS.hideEmptyLines;
+        }
+if (typeof this.settings.enableTemplateVariables !== 'boolean') {
+this.settings.enableTemplateVariables = DEFAULT_SETTINGS.enableTemplateVariables;
+        }
+if (typeof this.settings.fadeNoteTitleOpacity !== 'number') {
+this.settings.fadeNoteTitleOpacity = DEFAULT_SETTINGS.fadeNoteTitleOpacity;
         }
 
     }
@@ -414,6 +387,7 @@ this.saveSettings();
 
 
 
+
 dispatchHideEmptyLinesToEditors(newValue: boolean) {
         this.app.workspace.iterateAllLeaves(leaf => {
             if (leaf.view instanceof MarkdownView) {
@@ -428,6 +402,7 @@ dispatchHideEmptyLinesToEditors(newValue: boolean) {
             }
         });
     }
+
 
 
 
@@ -453,7 +428,7 @@ dispatchIncludeChildItemsToEditors(newValue: boolean) {
 addCssVariables() {
 const cssId = 'regex-filter-dynamic-styles'; if (document.getElementById(cssId)) return;
 const vignetteWidth = '160px'; const vignetteColor = 'rgba(0, 0, 0, 0.4)'; const transitionDuration = '0.3s';
-const cssVars = `:root { --regex-filter-vignette-width: ${vignetteWidth}; --regex-filter-vignette-color: ${vignetteColor}; --regex-filter-transition-duration: ${transitionDuration}; }`;
+const cssVars = `:root { --regex-filter-vignette-width: ${vignetteWidth}; --regex-filter-vignette-color: ${vignetteColor}; --regex-filter-transition-duration: ${transitionDuration}; --regex-filter-title-fade-opacity: ${this.settings.fadeNoteTitleOpacity}; }`;
 this.cssStyleEl = document.createElement('style'); this.cssStyleEl.id = cssId; this.cssStyleEl.textContent = cssVars;
 document.head.appendChild(this.cssStyleEl);
     }
@@ -465,6 +440,7 @@ const existingStyle = document.getElementById('regex-filter-dynamic-styles');
 if (existingStyle) { existingStyle.remove(); }
 
 document.body.classList.remove(ACTIVE_FILTER_BODY_CLASS);
+document.body.classList.remove(FADE_TITLE_BODY_CLASS);
     }
 
 
@@ -481,7 +457,7 @@ return;
 
 const currentFilterState = cm.state.field(filterStateField);
 
-if (currentFilterState.enabled) { // If ANY filter is active (saved or manual)
+if (currentFilterState.unresolvedRegexStrings.length > 0) { // If ANY filter is active (saved or manual)
 
 cm.dispatch({ effects: clearAllRegexesEffect.of() }); // Clear ALL active regexes
 
@@ -509,13 +485,17 @@ new RegexInputModal(
     (result: string | null, isPinned: boolean): void => {
         if (result && result.trim() !== "") { // Ensure result is not null or just whitespace
             try {
-                new RegExp(result, 'u'); // Validate syntax before applying
+                // Validate syntax AFTER resolving templates, if enabled
+                const stringToValidate = this.settings.enableTemplateVariables ? Templater.resolve(result) : result;
+                new RegExp(stringToValidate, 'u');
 
+                // If validation passes, dispatch the original, unresolved string to the state
                 this.lastRegexStr = result;
                 this.updateRegexHistory(result);
                 cm.dispatch({ effects: [applyManualRegexStringEffect.of(result)] });
                 this.updateBodyClassForActiveLeaf();
-                new Notice(`Regex filter enabled: /${result}/u`);
+                const finalRegex = this.settings.enableTemplateVariables ? Templater.resolve(result) : result;
+                new Notice(`Regex filter enabled: /${this.truncateRegex(finalRegex)}/u`);
 
                 // --- PINNING LOGIC ---
                 const savedRegexes = this.settings.savedRegexes || [];
@@ -572,34 +552,33 @@ new RegexInputModal(
 
 
 toggleSpecificSavedRegex(regexString: string, editor: Editor, view: MarkdownView) {
+        const cm = (editor as { cm?: EditorView }).cm;
+        if (!cm || !(cm instanceof EditorView)) { new Notice("Filter not available in this view."); return; }
 
-const cm = (editor as { cm?: EditorView }).cm;
-if (!cm || !(cm instanceof EditorView)) { new Notice("Filter not available in this view."); return; }
-
-
-
-
-const currentActiveStrings = cm.state.field(filterStateField).unresolvedRegexStrings;
-const isCurrentlyActive = currentActiveStrings.includes(regexString);
-
-
-
-cm.dispatch({ effects: toggleSpecificRegexStringEffect.of(regexString) });
-this.updateBodyClassForActiveLeaf();
-
-
-
-if (isCurrentlyActive) {
-
-new Notice(`Filter deactivated: /${this.truncateRegex(regexString)}/`);
-        } else {
-
-new Notice(`Filter activated: /${this.truncateRegex(regexString)}/`);
+        // Validate before dispatching if templates are on
+        if (this.settings.enableTemplateVariables) {
+            try {
+                new RegExp(Templater.resolve(regexString), 'u');
+            } catch (e) {
+                new Notice(`Invalid regex in saved filter: ${(e as Error).message}`);
+                return;
+            }
         }
 
+        const currentActiveStrings = cm.state.field(filterStateField).unresolvedRegexStrings;
+        const isCurrentlyActive = currentActiveStrings.includes(regexString);
+
+        // Dispatch the raw, unresolved string. Resolution will happen in the view.
+        cm.dispatch({ effects: toggleSpecificRegexStringEffect.of(regexString) });
+        this.updateBodyClassForActiveLeaf();
+
+        if (isCurrentlyActive) {
+            new Notice(`Filter deactivated: /${this.truncateRegex(regexString)}/`);
+        } else {
+            const finalRegex = this.settings.enableTemplateVariables ? Templater.resolve(regexString) : regexString;
+            new Notice(`Filter activated: /${this.truncateRegex(finalRegex)}/`);
+        }
     }
-
-
 
 
 truncateRegex(regex: string, maxLength = 30): string {
@@ -717,12 +696,38 @@ this.plugin.settings.includeChildItems = value;
 await this.plugin.saveSettings();
 this.plugin.dispatchIncludeChildItemsToEditors(value);
         }));
+
+new Setting(containerEl)
+    .setName('Enable {{date}} template variables')
+    .setDesc('When enabled, any instance of {{date}} or {{date:format}} in a filter will be replaced with the current date at the moment the filter is activated. This feature is disabled by default for performance.')
+    .addToggle(toggle => toggle
+        .setValue(this.plugin.settings.enableTemplateVariables)
+        .onChange(async (value) => {
+            this.plugin.settings.enableTemplateVariables = value;
+            await this.plugin.saveSettings();
+        }));
+
+new Setting(containerEl)
+    .setName('Fade note title opacity')
+    .setDesc('When a filter is active, fade the note title if it doesn\'t match. Set to 1.0 to disable.')
+    .addSlider(slider => slider
+        .setLimits(0, 1, 0.1)
+        .setValue(this.plugin.settings.fadeNoteTitleOpacity)
+        .setDynamicTooltip()
+        .onChange(async (value) => {
+            this.plugin.settings.fadeNoteTitleOpacity = value;
+            await this.plugin.saveSettings();
+            // Update the CSS variable in real-time
+            document.documentElement.style.setProperty('--regex-filter-title-fade-opacity', value.toString());
+            this.plugin.updateBodyClassForActiveLeaf();
+        }));
+
 containerEl.createEl('hr');
 containerEl.createEl('h3', { text: 'Saved Regex Filters' });
 const descEl = containerEl.createEl('p');
 descEl.innerHTML = `
     Manage your saved regex filters. These can be assigned to hotkeys (search for "Regex Line Filter: Toggle Filter").<br>
-    You can use template variables like <code>{{title}}</code> (the current note's title) and <code>{{date:YYYY-MM-DD}}</code> (the current date with optional formatting).
+    If template variables are enabled, you can use <code>{{date:YYYY-MM-DD}}</code> (the current date with optional formatting).
 `;
 new Setting(containerEl)
 
@@ -1068,13 +1073,6 @@ async doSubmit() {
 
     if (trimmedRegex === "") {
         new Notice("Regex cannot be empty.");
-        this.regexInputEl.focus();
-        return;
-    }
-    try {
-        new RegExp(trimmedRegex, 'u');
-    } catch (e) {
-        new Notice(`Invalid regex: ${(e as Error).message}`);
         this.regexInputEl.focus();
         return;
     }
