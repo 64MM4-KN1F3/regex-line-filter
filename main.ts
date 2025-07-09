@@ -1,4 +1,4 @@
-import { App, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting, WorkspaceLeaf, TFile } from 'obsidian';
+import { App, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting, WorkspaceLeaf, TFile, Events, TAbstractFile } from 'obsidian';
 import { StateField, StateEffect, RangeSetBuilder, EditorState } from '@codemirror/state';
 import { Templater } from './Templater';
 import { Decoration, DecorationSet, EditorView, ViewPlugin, ViewUpdate } from '@codemirror/view';
@@ -13,16 +13,17 @@ export interface SavedRegexItem {
   id: string;
   name?: string; // Optional name for the regex
   regex: string;
-  pinned?: boolean; // New property for pinning
 }
 
 interface RegexLineFilterSettings {
   hideEmptyLines: boolean;
   includeChildItems: boolean;
   enableTemplateVariables: boolean;
-  fadeNoteTitleOpacity: number;
+  noteTitleTransparency: number;
   regexHistory: string[];
   savedRegexes: SavedRegexItem[];
+  pinnedRegexes: string[];
+  persistedFilters: { [filePath: string]: string[] };
   // activeFilters: string[]; // This will no longer be stored in settings
 }
 
@@ -30,9 +31,11 @@ const DEFAULT_SETTINGS: RegexLineFilterSettings = {
   hideEmptyLines: true,
   includeChildItems: true,
   enableTemplateVariables: false,
-  fadeNoteTitleOpacity: 1.0,
+  noteTitleTransparency: 0,
   regexHistory: [],
   savedRegexes: [],
+  pinnedRegexes: [],
+  persistedFilters: {},
   // activeFilters: [], // This is now managed per-editor instance
 }
 
@@ -65,6 +68,7 @@ interface FilterState {
 const toggleSpecificRegexStringEffect = StateEffect.define<string>();      // Adds/removes a specific regex string
 const applyManualRegexStringEffect = StateEffect.define<string | null>(); // Sets activeRegexStrings to [newString] or []
 const clearAllRegexesEffect = StateEffect.define<void>();                 // Clears all active regex strings
+const replaceAllRegexStringsEffect = StateEffect.define<string[]>();      // Replaces all strings, used for loading from persistence
 const setHideEmptyLinesEffect = StateEffect.define<boolean>();
 const setIncludeChildItemsEffect = StateEffect.define<boolean>();
 
@@ -101,6 +105,8 @@ update(value, tr): FilterState {
                 newState.unresolvedRegexStrings = effect.value === null ? [] : [effect.value];
             } else if (effect.is(clearAllRegexesEffect)) {
                 newState.unresolvedRegexStrings = [];
+            } else if (effect.is(replaceAllRegexStringsEffect)) {
+                newState.unresolvedRegexStrings = effect.value;
             } else if (effect.is(setHideEmptyLinesEffect)) {
                 newState.hideEmptyLines = effect.value;
             } else if (effect.is(setIncludeChildItemsEffect)) {
@@ -123,6 +129,7 @@ settings: RegexLineFilterSettings;
 lastRegexStr: string | null = null; // For pre-filling manual input modal
 
 cssStyleEl: HTMLElement | null = null;
+events = new Events();
 
 
 
@@ -261,12 +268,17 @@ this.registerEditorExtension([
 
 this.addCssVariables();
 this.registerEvent(this.app.workspace.on('active-leaf-change', this.handleActiveLeafChange));
+this.registerEvent(this.app.vault.on('rename', this.handleFileRename));
 this.app.workspace.onLayoutReady(() => {
 this.dispatchHideEmptyLinesToEditors(this.settings.hideEmptyLines);
 this.dispatchIncludeChildItemsToEditors(this.settings.includeChildItems);
 this.updateBodyClassForActiveLeaf();
         });
 this.updateBodyClassForActiveLeaf();
+
+        // Register listeners that will trigger a settings tab refresh if it's open
+        this.registerEvent(this.app.workspace.on('layout-change', () => this.events.trigger('filter-changed')));
+        this.registerEvent(this.app.workspace.on('active-leaf-change', () => this.events.trigger('filter-changed')));
     }
 
 
@@ -278,10 +290,39 @@ console.log('Unloading Regex Line Filter plugin');
 this.removeCssVariables();
     }
 
+private handleFileRename = async (file: TAbstractFile, oldPath: string): Promise<void> => {
+    if (file instanceof TFile) {
+        if (this.settings.persistedFilters.hasOwnProperty(oldPath)) {
+            this.settings.persistedFilters[file.path] = this.settings.persistedFilters[oldPath];
+            delete this.settings.persistedFilters[oldPath];
+            await this.saveSettings();
+        }
+    }
+}
+
 
 
 
 private handleActiveLeafChange = (leaf: WorkspaceLeaf | null): void => {
+        // Part 1: Load persisted filters for the view if it's a MarkdownView
+        if (leaf && leaf.view instanceof MarkdownView) {
+            const view = leaf.view;
+            const file = view.file;
+            if (file) {
+                const persistedFilters = this.settings.persistedFilters[file.path] || [];
+                const cm = (view.editor as any).cm as EditorView;
+                if (cm) {
+                    const currentState = cm.state.field(filterStateField, false);
+                    // Only dispatch if the state is different from what's persisted
+                    if (currentState && JSON.stringify(currentState.unresolvedRegexStrings) !== JSON.stringify(persistedFilters)) {
+                        cm.dispatch({ effects: replaceAllRegexStringsEffect.of(persistedFilters) });
+                        // The state is now updated. The rest of this function will use the new state.
+                    }
+                }
+            }
+        }
+
+        // Part 2: Update body classes based on the (potentially new) state
         let filterIsEnabledOnActiveLeaf = false;
         let shouldFadeTitle = false;
 
@@ -292,7 +333,7 @@ private handleActiveLeafChange = (leaf: WorkspaceLeaf | null): void => {
                 if (fieldState && fieldState.unresolvedRegexStrings.length > 0) {
                     filterIsEnabledOnActiveLeaf = true;
 
-                    if (this.settings.fadeNoteTitleOpacity < 1.0) {
+                    if (this.settings.noteTitleTransparency > 0) {
                         const activeFile = this.app.workspace.getActiveFile();
                         if (activeFile) {
                             const title = activeFile.basename;
@@ -342,6 +383,8 @@ async loadSettings() {
 this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
 this.settings.regexHistory = (this.settings.regexHistory || []).slice(0, REGEX_HISTORY_LIMIT);
 this.settings.savedRegexes = this.settings.savedRegexes || [];
+this.settings.pinnedRegexes = this.settings.pinnedRegexes || [];
+this.settings.persistedFilters = this.settings.persistedFilters || {};
 // this.settings.activeFilters = this.settings.activeFilters || []; // No longer needed
 if (typeof this.settings.includeChildItems !== 'boolean') {
 
@@ -355,8 +398,8 @@ this.settings.hideEmptyLines = DEFAULT_SETTINGS.hideEmptyLines;
 if (typeof this.settings.enableTemplateVariables !== 'boolean') {
 this.settings.enableTemplateVariables = DEFAULT_SETTINGS.enableTemplateVariables;
         }
-if (typeof this.settings.fadeNoteTitleOpacity !== 'number') {
-this.settings.fadeNoteTitleOpacity = DEFAULT_SETTINGS.fadeNoteTitleOpacity;
+if (typeof this.settings.noteTitleTransparency !== 'number') {
+this.settings.noteTitleTransparency = DEFAULT_SETTINGS.noteTitleTransparency;
         }
 
     }
@@ -367,6 +410,17 @@ this.settings.fadeNoteTitleOpacity = DEFAULT_SETTINGS.fadeNoteTitleOpacity;
 async saveSettings() {
 
 await this.saveData(this.settings);
+}
+
+async saveFiltersForFile(filePath: string, regexStrings: string[]) {
+    if (regexStrings.length > 0) {
+        this.settings.persistedFilters[filePath] = [...regexStrings];
+    } else {
+        if (this.settings.persistedFilters.hasOwnProperty(filePath)) {
+            delete this.settings.persistedFilters[filePath];
+        }
+    }
+    await this.saveSettings();
 }
 
 // This function is no longer needed as the state is not saved globally.
@@ -428,7 +482,8 @@ dispatchIncludeChildItemsToEditors(newValue: boolean) {
 addCssVariables() {
 const cssId = 'regex-filter-dynamic-styles'; if (document.getElementById(cssId)) return;
 const vignetteWidth = '160px'; const vignetteColor = 'rgba(0, 0, 0, 0.4)'; const transitionDuration = '0.3s';
-const cssVars = `:root { --regex-filter-vignette-width: ${vignetteWidth}; --regex-filter-vignette-color: ${vignetteColor}; --regex-filter-transition-duration: ${transitionDuration}; --regex-filter-title-fade-opacity: ${this.settings.fadeNoteTitleOpacity}; }`;
+const opacity = 1 - this.settings.noteTitleTransparency;
+const cssVars = `:root { --regex-filter-vignette-width: ${vignetteWidth}; --regex-filter-vignette-color: ${vignetteColor}; --regex-filter-transition-duration: ${transitionDuration}; --regex-filter-title-fade-opacity: ${opacity}; }`;
 this.cssStyleEl = document.createElement('style'); this.cssStyleEl.id = cssId; this.cssStyleEl.textContent = cssVars;
 document.head.appendChild(this.cssStyleEl);
     }
@@ -459,7 +514,16 @@ const currentFilterState = cm.state.field(filterStateField);
 
 if (currentFilterState.unresolvedRegexStrings.length > 0) { // If ANY filter is active (saved or manual)
 
-cm.dispatch({ effects: clearAllRegexesEffect.of() }); // Clear ALL active regexes
+// Save cursor position before clearing
+const currentSelection = cm.state.selection;
+cm.dispatch({
+    effects: clearAllRegexesEffect.of(),
+    selection: currentSelection // Restore selection after clearing
+});
+
+if (view.file) {
+    this.saveFiltersForFile(view.file.path, []);
+}
 
 this.updateBodyClassForActiveLeaf();
 new Notice('All regex filters disabled.');
@@ -493,42 +557,18 @@ new RegexInputModal(
                 this.lastRegexStr = result;
                 this.updateRegexHistory(result);
                 cm.dispatch({ effects: [applyManualRegexStringEffect.of(result)] });
+                
+                // Save the new state
+                const file = this.app.workspace.getActiveViewOfType(MarkdownView)?.file;
+                if (file) {
+                    this.saveFiltersForFile(file.path, [result]);
+                }
+                
                 this.updateBodyClassForActiveLeaf();
                 const finalRegex = this.settings.enableTemplateVariables ? Templater.resolve(result) : result;
                 new Notice(`Regex filter enabled: /${this.truncateRegex(finalRegex)}/u`);
 
-                // --- PINNING LOGIC ---
-                const savedRegexes = this.settings.savedRegexes || [];
-                const existingSaved = savedRegexes.find(r => r.regex === result);
-
-                if (isPinned) {
-                    if (existingSaved) {
-                        if (!existingSaved.pinned) {
-                            existingSaved.pinned = true;
-                            this.registerToggleCommandForSavedRegex(existingSaved);
-                            new Notice(`Pinned: ${existingSaved.name || `/${this.truncateRegex(existingSaved.regex)}/`}`);
-                        }
-                    } else {
-                        const newItem: SavedRegexItem = {
-                            id: Date.now().toString(36) + Math.random().toString(36).substring(2, 9),
-                            regex: result,
-                            pinned: true,
-                            name: ''
-                        };
-                        this.settings.savedRegexes.push(newItem);
-                        this.registerToggleCommandForSavedRegex(newItem);
-                        new Notice(`Saved and pinned: /${this.truncateRegex(result)}/`);
-                    }
-                    this.saveSettings();
-                } else { // isPinned is false
-                    if (existingSaved && existingSaved.pinned) {
-                        existingSaved.pinned = false;
-                        this.unregisterCommandForSavedRegex(existingSaved.id);
-                        new Notice(`Unpinned: ${existingSaved.name || `/${this.truncateRegex(existingSaved.regex)}/`}`);
-                        this.saveSettings();
-                    }
-                }
-                // --- END PINNING LOGIC ---
+                // Pinning is now handled inside the RegexInputModal
 
             } catch (e) {
                 new Notice(`Invalid regex: ${(e as Error).message}`);
@@ -537,7 +577,18 @@ new RegexInputModal(
             }
         } else if (result === "" || result === null) { // User submitted empty or cancelled
             if (result === "") { // Explicit empty submission
-                cm.dispatch({ effects: applyManualRegexStringEffect.of(null) });
+                const currentSelection = cm.state.selection;
+                cm.dispatch({
+                    effects: applyManualRegexStringEffect.of(null),
+                    selection: currentSelection
+                });
+                
+                // Save the cleared state
+                const file = this.app.workspace.getActiveViewOfType(MarkdownView)?.file;
+                if (file) {
+                    this.saveFiltersForFile(file.path, []);
+                }
+                
                 this.updateBodyClassForActiveLeaf();
                 new Notice('Regex filter cleared by empty input.');
             } else { // Cancelled (result is null)
@@ -569,8 +620,20 @@ toggleSpecificSavedRegex(regexString: string, editor: Editor, view: MarkdownView
         const isCurrentlyActive = currentActiveStrings.includes(regexString);
 
         // Dispatch the raw, unresolved string. Resolution will happen in the view.
-        cm.dispatch({ effects: toggleSpecificRegexStringEffect.of(regexString) });
+        const currentSelection = cm.state.selection;
+        cm.dispatch({
+            effects: toggleSpecificRegexStringEffect.of(regexString),
+            selection: currentSelection
+        });
+        
+        // Save the new state
+        const newActiveStrings = cm.state.field(filterStateField).unresolvedRegexStrings;
+        if (view.file) {
+            this.saveFiltersForFile(view.file.path, newActiveStrings);
+        }
+        
         this.updateBodyClassForActiveLeaf();
+        this.events.trigger('filter-changed');
 
         if (isCurrentlyActive) {
             new Notice(`Filter deactivated: /${this.truncateRegex(regexString)}/`);
@@ -591,7 +654,7 @@ return regex.substring(0, maxLength) + "...";
 
 
 registerAllToggleSavedRegexCommands() {
-        (this.settings.savedRegexes || []).filter(item => item.pinned).forEach(item => this.registerToggleCommandForSavedRegex(item));
+        (this.settings.savedRegexes || []).forEach(item => this.registerToggleCommandForSavedRegex(item));
     }
 
 
@@ -655,7 +718,15 @@ super(app, plugin);
 this.plugin = plugin;
   }
 
+    private onFilterChanged = () => {
+        if (this.containerEl.isShown() && this.savedRegexesDiv) {
+            this.initExistingSavedRegexes(this.savedRegexesDiv);
+        }
+    }
 
+    hide() {
+        this.plugin.events.off('filter-changed', this.onFilterChanged);
+    }
 
 
 display(): void {
@@ -698,8 +769,14 @@ this.plugin.dispatchIncludeChildItemsToEditors(value);
         }));
 
 new Setting(containerEl)
-    .setName('Enable {{date}} template variables')
-    .setDesc('When enabled, any instance of {{date}} or {{date:format}} in a filter will be replaced with the current date at the moment the filter is activated. This feature is disabled by default for performance.')
+    .setName('Enable template variables')
+    .setDesc(
+        'When enabled, templates resolve to dates or date ranges. ' +
+        'Simple variables like {{today}} or {{yesterday}} resolve to a single date. ' +
+        'Range variables like {{last-week}}, {{this-month}}, or {{next-year}} resolve to a regex matching all dates in that range (e.g., (2023-01-01|2023-01-02|...)). ' +
+        'You can also specify a custom format, e.g., {{today:DD-MM-YYYY}} or {{last-week:DD/MM/YYYY}}. ' +
+        'Supported variables: today, yesterday, tomorrow, this-week, last-week, next-week, this-month, last-month, next-month, this-year, last-year, next-year.'
+    )
     .addToggle(toggle => toggle
         .setValue(this.plugin.settings.enableTemplateVariables)
         .onChange(async (value) => {
@@ -708,17 +785,18 @@ new Setting(containerEl)
         }));
 
 new Setting(containerEl)
-    .setName('Fade note title opacity')
-    .setDesc('When a filter is active, fade the note title if it doesn\'t match. Set to 1.0 to disable.')
+    .setName('Note title transparency')
+    .setDesc('Sets the transparency amount for the note title when a filter is active and the title does not match the filter. 0 is fully opaque, 1 is fully transparent.')
     .addSlider(slider => slider
         .setLimits(0, 1, 0.1)
-        .setValue(this.plugin.settings.fadeNoteTitleOpacity)
+        .setValue(this.plugin.settings.noteTitleTransparency)
         .setDynamicTooltip()
         .onChange(async (value) => {
-            this.plugin.settings.fadeNoteTitleOpacity = value;
+            this.plugin.settings.noteTitleTransparency = value;
             await this.plugin.saveSettings();
             // Update the CSS variable in real-time
-            document.documentElement.style.setProperty('--regex-filter-title-fade-opacity', value.toString());
+            const opacity = 1 - value;
+            document.documentElement.style.setProperty('--regex-filter-title-fade-opacity', opacity.toString());
             this.plugin.updateBodyClassForActiveLeaf();
         }));
 
@@ -727,7 +805,6 @@ containerEl.createEl('h3', { text: 'Saved Regex Filters' });
 const descEl = containerEl.createEl('p');
 descEl.innerHTML = `
     Manage your saved regex filters. These can be assigned to hotkeys (search for "Regex Line Filter: Toggle Filter").<br>
-    If template variables are enabled, you can use <code>{{date:YYYY-MM-DD}}</code> (the current date with optional formatting).
 `;
 new Setting(containerEl)
 
@@ -739,12 +816,24 @@ button.setButtonText('Add New Saved Regex').setCta()
         });
 this.savedRegexesDiv = containerEl.createDiv('saved-regex-list');
 this.initExistingSavedRegexes(this.savedRegexesDiv);
+
+        // Listen for the custom event from the plugin
+        this.plugin.events.on('filter-changed', this.onFilterChanged);
   }
 
 
 
 
 initExistingSavedRegexes(container: HTMLDivElement): void {
+    const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+    let activeFilters: string[] = [];
+    if (activeView) {
+        const cm = (activeView.editor as any).cm as EditorView;
+        if (cm && cm.state.field(filterStateField, false)) {
+            const state = cm.state.field(filterStateField);
+            activeFilters = state.unresolvedRegexStrings;
+        }
+    }
 
 container.empty();
 const savedRegexes = this.plugin.settings.savedRegexes || [];
@@ -778,15 +867,25 @@ settingControl.settingEl.style.border = 'none'; settingControl.settingEl.style.p
 
 
 settingControl.addExtraButton(button => {
+    const isCurrentlyActive = activeFilters.includes(savedRegexItem.regex);
+    button
+        .setIcon(isCurrentlyActive ? 'pause' : 'play')
+        .setTooltip(isCurrentlyActive ? 'Deactivate this filter' : 'Activate this filter');
 
-button.setIcon('play').setTooltip('Toggle this regex filter')
+    if (isCurrentlyActive) {
+        button.extraSettingsEl.addClass('is-active');
+    }
 
-                .onClick(() => {
-const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-if (activeView) this.plugin.toggleSpecificSavedRegex(savedRegexItem.regex, activeView.editor, activeView);
-else new Notice('No active Markdown editor to toggle the regex on.');
-                });
-        });
+    button.onClick(() => {
+        const currentActiveView = this.app.workspace.getActiveViewOfType(MarkdownView);
+        if (currentActiveView) {
+            this.plugin.toggleSpecificSavedRegex(savedRegexItem.regex, currentActiveView.editor, currentActiveView);
+            // The 'filter-changed' event will handle the refresh
+        } else {
+            new Notice('No active Markdown editor to toggle the filter on.');
+        }
+    });
+});
 settingControl.addExtraButton(button => {
 
 button.setIcon('edit').setTooltip('Edit Regex')
@@ -818,7 +917,17 @@ if (removedItem) {
                 if (cm) {
                     const state = cm.state.field(filterStateField, false);
                     if (state && state.unresolvedRegexStrings.includes(removedItem.regex)) {
-                        cm.dispatch({ effects: toggleSpecificRegexStringEffect.of(removedItem.regex) }); // This will remove it
+                        const currentSelection = cm.state.selection;
+                                                cm.dispatch({
+                                                    effects: toggleSpecificRegexStringEffect.of(removedItem.regex),
+                                                    selection: currentSelection
+                                                }); // This will remove it
+                                                
+                                                // After dispatch, the state is updated. Get the new state and save it.
+                                                const newFilters = cm.state.field(filterStateField).unresolvedRegexStrings;
+                                                if (leaf.view.file) {
+                                                    this.plugin.saveFiltersForFile(leaf.view.file.path, newFilters);
+                                                }
                     }
                 }
             }
@@ -833,6 +942,7 @@ this.plugin.unregisterCommandForSavedRegex(removedItem.id);
 this.initExistingSavedRegexes(this.savedRegexesDiv);
 new Notice(`Removed saved regex: /${this.plugin.truncateRegex(removedItem.regex)}/`);
 this.plugin.updateBodyClassForActiveLeaf(); // Update body class in case the removed filter was the last active one
+this.plugin.events.trigger('filter-changed');
 
     }
 
@@ -883,15 +993,15 @@ this.inputComponent = new Setting(contentEl).setName('Regular expression (suppor
 })
 this.inputComponent.controlEl.addClass('regex-filter-input-control');
 // --- Pinned & History Display ---
-const pinnedItems = this.plugin.settings.savedRegexes.filter(item => item.pinned);
-const historyItems = (this.history || []).filter(histEntry => !pinnedItems.some(p => p.regex === histEntry));
+const pinnedItems = this.plugin.settings.pinnedRegexes || [];
+const historyItems = (this.history || []).filter(histEntry => !pinnedItems.includes(histEntry));
 
 // Pinned Items Section
 if (pinnedItems.length > 0) {
     const pinnedEl = contentEl.createDiv({ cls: 'regex-filter-pinned-container' });
     pinnedEl.createSpan({ text: 'Pinned:', cls: 'regex-filter-section-label' });
-    pinnedItems.forEach(pinnedItem => {
-        this.createHistoryItem(pinnedEl, pinnedItem.regex, true);
+    pinnedItems.forEach(pinnedRegex => {
+        this.createHistoryItem(pinnedEl, pinnedRegex, true);
     });
 }
 
@@ -936,11 +1046,9 @@ createHistoryItem(container: HTMLElement, regexString: string, isPinned: boolean
 
     const textEl = itemContainer.createEl('span', { text: `/${regexString}/`, cls: 'regex-filter-history-item' });
     textEl.addEventListener('click', () => {
-        if (this.textInputEl) {
-            this.textInputEl.value = regexString;
-            this.result = regexString;
-            this.textInputEl.focus();
-        }
+        this.result = regexString;
+        this.close();
+        this.onSubmit(this.result, isPinned);
     });
 
     const controlsContainer = itemContainer.createDiv({ cls: 'regex-item-controls' });
@@ -951,10 +1059,9 @@ createHistoryItem(container: HTMLElement, regexString: string, isPinned: boolean
         unpinIcon.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="svg-icon lucide-pin-off"><line x1="12" x2="12" y1="17" y2="22"></line><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6a3 3 0 0 0-3-3a3 3 0 0 0-3 3v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"></path><line x1="2" x2="22" y1="2" y2="22"></line></svg>`;
         unpinIcon.setAttribute('aria-label', 'Unpin - item may be purged if not used recently');
         unpinIcon.addEventListener('click', async () => {
-            const itemToUnpin = this.plugin.settings.savedRegexes.find(r => r.regex === regexString);
-            if (itemToUnpin) {
-                itemToUnpin.pinned = false;
-                this.plugin.unregisterCommandForSavedRegex(itemToUnpin.id);
+            const index = this.plugin.settings.pinnedRegexes.indexOf(regexString);
+            if (index > -1) {
+                this.plugin.settings.pinnedRegexes.splice(index, 1);
                 await this.plugin.saveSettings();
                 new Notice(`Unpinned: /${this.plugin.truncateRegex(regexString)}/`);
                 this.onOpen(); // Refresh the modal content
@@ -966,11 +1073,16 @@ createHistoryItem(container: HTMLElement, regexString: string, isPinned: boolean
         saveIcon.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="svg-icon lucide-save"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>`;
         saveIcon.setAttribute('aria-label', 'Save - this item will move to the custom filter list in plugin options, hotkey may then be assigned');
         saveIcon.addEventListener('click', () => {
-            const itemToSave = this.plugin.settings.savedRegexes.find(r => r.regex === regexString);
-            if (itemToSave) {
-                this.close();
-                new AddSavedRegexModal(this.app, this.plugin, new RegexLineFilterSettingTab(this.app, this.plugin), itemToSave, this.plugin.settings.savedRegexes.indexOf(itemToSave)).open();
-            }
+            // Create a temporary SavedRegexItem to pass to the Add modal
+            const itemToSave: SavedRegexItem = {
+                id: '', // ID will be generated on actual save
+                regex: regexString,
+                name: ''
+            };
+            this.close();
+            // The Add modal will handle adding it to the *real* saved list
+            // and removing it from the pinned list.
+            new AddSavedRegexModal(this.app, this.plugin, new RegexLineFilterSettingTab(this.app, this.plugin), itemToSave, -1).open();
         });
 
     } else {
@@ -979,22 +1091,12 @@ createHistoryItem(container: HTMLElement, regexString: string, isPinned: boolean
         pinIcon.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="svg-icon lucide-pin"><path d="M12 17v5"></path><path d="M9 10.75A2.75 2.75 0 0 1 12 8a2.75 2.75 0 0 1 3 2.75V17h-6Z"></path><path d="M12 8V2"></path></svg>`;
         pinIcon.setAttribute('aria-label', 'Pin item');
         pinIcon.addEventListener('click', async () => {
-            let existing = this.plugin.settings.savedRegexes.find(r => r.regex === regexString);
-            if (existing) {
-                existing.pinned = true;
-            } else {
-                existing = {
-                    id: Date.now().toString(36) + Math.random().toString(36).substring(2, 9),
-                    regex: regexString,
-                    pinned: true,
-                    name: ''
-                };
-                this.plugin.settings.savedRegexes.push(existing);
+            if (!this.plugin.settings.pinnedRegexes.includes(regexString)) {
+                this.plugin.settings.pinnedRegexes.push(regexString);
+                await this.plugin.saveSettings();
+                new Notice(`Pinned: /${this.plugin.truncateRegex(regexString)}/`);
+                this.onOpen(); // Refresh the modal content
             }
-            this.plugin.registerToggleCommandForSavedRegex(existing);
-            await this.plugin.saveSettings();
-            new Notice(`Pinned: /${this.plugin.truncateRegex(regexString)}/`);
-            this.onOpen(); // Refresh the modal content
         });
     }
 }
@@ -1099,8 +1201,14 @@ async doSubmit() {
                         if (cm) {
                             const state = cm.state.field(filterStateField, false);
                             if (state && state.unresolvedRegexStrings.includes(oldRegexString)) {
-                                cm.dispatch({ effects: toggleSpecificRegexStringEffect.of(oldRegexString) }); // remove old
-                                cm.dispatch({ effects: toggleSpecificRegexStringEffect.of(trimmedRegex) }); // add new if it was active
+                                const currentSelection = cm.state.selection;
+                                cm.dispatch({
+                                    effects: [
+                                        toggleSpecificRegexStringEffect.of(oldRegexString),
+                                        toggleSpecificRegexStringEffect.of(trimmedRegex)
+                                    ],
+                                    selection: currentSelection
+                                });
                             }
                         }
                     }
@@ -1117,14 +1225,19 @@ async doSubmit() {
             id: Date.now().toString(36) + Math.random().toString(36).substring(2, 9),
             name: trimmedName,
             regex: trimmedRegex,
-            pinned: false // Default pinned to false
         };
         savedRegexes.push(newItem);
-        // Do not register command on creation, only when pinned.
+        this.plugin.registerToggleCommandForSavedRegex(newItem);
         new Notice('New filter saved!');
     }
 
     if (changesMade) {
+        // Upon saving, remove the item from the temporary pinned list.
+        const pinnedIndex = this.plugin.settings.pinnedRegexes.indexOf(trimmedRegex);
+        if (pinnedIndex > -1) {
+            this.plugin.settings.pinnedRegexes.splice(pinnedIndex, 1);
+        }
+
         this.plugin.settings.savedRegexes = savedRegexes;
         await this.plugin.saveSettings();
         this.settingsTab.initExistingSavedRegexes(this.settingsTab.savedRegexesDiv);

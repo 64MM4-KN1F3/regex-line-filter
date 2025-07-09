@@ -258,3 +258,9 @@ body.regex-filter-fade-title .inline-title {
     color: var(--text-muted);
     font-family: var(--font-monospace);
 }
+
+/* Style for the active toggle button in settings */
+.saved-regex-item .setting-item-control .is-active.is-active .clickable-icon,
+.saved-regex-item .setting-item-control .is-active .clickable-icon {
+    color: var(--text-accent);
+}
