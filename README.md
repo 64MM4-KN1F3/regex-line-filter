@@ -46,4 +46,4 @@ The plugin allows users to filter the active editor view in Obsidian so that onl
 **License:**
 Apache 2.0
 
-<a href="https://www.buymeacoffee.com/64mm4kn1f3"><img src="https://img.buymeacoffee.com/button-api/?text=Buy me a coffee&emoji=☕&slug=64mm4kn1f3&button_colour=3f2f8e&font_colour=3f2f8e&font_family=Cookie&outline_colour=000000&coffee_colour=FFDD00" /></a>
+<a href="https://www.buymeacoffee.com/64mm4kn1f3" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" style="height: 60px !important;width: 217px !important;" ></a>
