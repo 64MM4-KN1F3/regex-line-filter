@@ -1,6 +1,7 @@
 ## Regex Line Filter plugin for Obsidian
 ![image](/images/logo_15.png)
 
+
 **Version 1.3**
 
 #### Purpose:
