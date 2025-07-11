@@ -18,6 +18,7 @@ export interface SavedRegexItem {
 interface RegexLineFilterSettings {
   hideEmptyLines: boolean;
   includeChildItems: boolean;
+  includeHeadingChildItems: boolean;
   enableTemplateVariables: boolean;
   noteTitleTransparency: number;
   regexHistory: string[];
@@ -30,6 +31,7 @@ interface RegexLineFilterSettings {
 const DEFAULT_SETTINGS: RegexLineFilterSettings = {
   hideEmptyLines: true,
   includeChildItems: true,
+  includeHeadingChildItems: false,
   enableTemplateVariables: false,
   noteTitleTransparency: 0,
   regexHistory: [],
@@ -63,6 +65,7 @@ interface FilterState {
   unresolvedRegexStrings: string[]; // Stores the original, UNRESOLVED strings
   hideEmptyLines: boolean;
   includeChildItems: boolean;
+  includeHeadingChildItems: boolean;
 }
 
 const toggleSpecificRegexStringEffect = StateEffect.define<string>();      // Adds/removes a specific regex string
@@ -71,6 +74,7 @@ const clearAllRegexesEffect = StateEffect.define<void>();                 // Cle
 const replaceAllRegexStringsEffect = StateEffect.define<string[]>();      // Replaces all strings, used for loading from persistence
 const setHideEmptyLinesEffect = StateEffect.define<boolean>();
 const setIncludeChildItemsEffect = StateEffect.define<boolean>();
+const setIncludeHeadingChildItemsEffect = StateEffect.define<boolean>();
 
 
 
@@ -85,12 +89,14 @@ create(editorState: EditorState): FilterState {
             unresolvedRegexStrings: [],
             hideEmptyLines: DEFAULT_SETTINGS.hideEmptyLines, // Fallback, should be overridden by .init
             includeChildItems: DEFAULT_SETTINGS.includeChildItems, // Fallback
+            includeHeadingChildItems: DEFAULT_SETTINGS.includeHeadingChildItems, // Fallback
         };
     },
 
 update(value, tr): FilterState {
         let newState = { ...value };
         for (let effect of tr.effects) {
+            console.log("Regex Filter: Processing effect", effect);
             if (effect.is(toggleSpecificRegexStringEffect)) {
                 const str = effect.value;
                 const index = newState.unresolvedRegexStrings.indexOf(str);
@@ -101,8 +107,10 @@ update(value, tr): FilterState {
                     newStrings.push(str);
                 }
                 newState.unresolvedRegexStrings = newStrings;
+                console.log("Regex Filter: New unresolved strings (toggle)", newState.unresolvedRegexStrings);
             } else if (effect.is(applyManualRegexStringEffect)) {
                 newState.unresolvedRegexStrings = effect.value === null ? [] : [effect.value];
+                console.log("Regex Filter: New unresolved strings (manual)", newState.unresolvedRegexStrings);
             } else if (effect.is(clearAllRegexesEffect)) {
                 newState.unresolvedRegexStrings = [];
             } else if (effect.is(replaceAllRegexStringsEffect)) {
@@ -111,6 +119,8 @@ update(value, tr): FilterState {
                 newState.hideEmptyLines = effect.value;
             } else if (effect.is(setIncludeChildItemsEffect)) {
                 newState.includeChildItems = effect.value;
+            } else if (effect.is(setIncludeHeadingChildItemsEffect)) {
+               newState.includeHeadingChildItems = effect.value;
             }
         }
         return newState;
@@ -157,10 +167,12 @@ private createFilterViewPlugin() {
 
             buildDecorations(view: EditorView): DecorationSet {
                 const builder = new RangeSetBuilder<Decoration>();
-                const { unresolvedRegexStrings, hideEmptyLines, includeChildItems } = view.state.field(filterStateField);
+                const { unresolvedRegexStrings, hideEmptyLines, includeChildItems, includeHeadingChildItems } = view.state.field(filterStateField);
+                console.log("Regex Filter: buildDecorations called. Unresolved strings:", unresolvedRegexStrings);
                 const enabled = unresolvedRegexStrings.length > 0;
 
                 if (!enabled) {
+                    console.log("Regex Filter: No filters enabled, finishing decoration build.");
                     return builder.finish();
                 }
 
@@ -168,10 +180,13 @@ private createFilterViewPlugin() {
                 const resolvedRegexStrings = plugin.settings.enableTemplateVariables
                     ? unresolvedRegexStrings.map(s => Templater.resolve(s))
                     : unresolvedRegexStrings;
+                console.log("Regex Filter: Resolved strings:", resolvedRegexStrings);
 
                 const combinedRegex = buildCombinedRegex(resolvedRegexStrings);
+                console.log("Regex Filter: Combined Regex:", combinedRegex);
 
                 if (!combinedRegex) {
+                    console.log("Regex Filter: Combined regex is null, finishing decoration build.");
                     return builder.finish();
                 }
 
@@ -181,12 +196,17 @@ private createFilterViewPlugin() {
                     const match = text.match(/^(\s*)/);
                     return match ? match[1].length : 0;
                 };
+                const getHeadingLevel = (text: string): number => {
+                    const match = text.match(/^(#+)\s/);
+                    return match ? match[1].length : 0;
+                }
 
                 try {
                     for (let i = 1; i <= doc.lines; i++) {
                         const line = doc.line(i);
                         if (combinedRegex.test(line.text)) {
                             isVisible[i] = true;
+                            // Handle indented children
                             if (includeChildItems) {
                                 const parentIndent = getIndentLevel(line.text);
                                 for (let j = i + 1; j <= doc.lines; j++) {
@@ -196,6 +216,20 @@ private createFilterViewPlugin() {
                                         isVisible[j] = true;
                                     } else {
                                         break;
+                                    }
+                                }
+                            }
+                            // Handle heading children
+                            if (includeHeadingChildItems) {
+                                const parentHeadingLevel = getHeadingLevel(line.text);
+                                if (parentHeadingLevel > 0) {
+                                    for (let j = i + 1; j <= doc.lines; j++) {
+                                        const childLine = doc.line(j);
+                                        const childHeadingLevel = getHeadingLevel(childLine.text);
+                                        if (childHeadingLevel > 0 && childHeadingLevel <= parentHeadingLevel) {
+                                            break;
+                                        }
+                                        isVisible[j] = true;
                                     }
                                 }
                             }
@@ -212,6 +246,7 @@ private createFilterViewPlugin() {
                         }
 
                         if (shouldHide) {
+                            // console.log(`Regex Filter: Hiding line ${i}`); // This can be very noisy
                             builder.add(line.from, line.from, Decoration.line({ attributes: { class: 'regex-filter-hidden-line' } }));
                         }
                     }
@@ -260,6 +295,7 @@ this.registerEditorExtension([
         unresolvedRegexStrings: [],
         hideEmptyLines: this.settings.hideEmptyLines,
         includeChildItems: this.settings.includeChildItems,
+        includeHeadingChildItems: this.settings.includeHeadingChildItems,
     })),
     this.createFilterViewPlugin()
 ]);
@@ -272,6 +308,7 @@ this.registerEvent(this.app.vault.on('rename', this.handleFileRename));
 this.app.workspace.onLayoutReady(() => {
 this.dispatchHideEmptyLinesToEditors(this.settings.hideEmptyLines);
 this.dispatchIncludeChildItemsToEditors(this.settings.includeChildItems);
+this.dispatchIncludeHeadingChildItemsToEditors(this.settings.includeHeadingChildItems);
 this.updateBodyClassForActiveLeaf();
         });
 this.updateBodyClassForActiveLeaf();
@@ -390,6 +427,9 @@ if (typeof this.settings.includeChildItems !== 'boolean') {
 
 this.settings.includeChildItems = DEFAULT_SETTINGS.includeChildItems;
         }
+if (typeof this.settings.includeHeadingChildItems !== 'boolean') {
+this.settings.includeHeadingChildItems = DEFAULT_SETTINGS.includeHeadingChildItems;
+        }
 
 if (typeof this.settings.hideEmptyLines !== 'boolean') {
 
@@ -471,6 +511,21 @@ dispatchIncludeChildItemsToEditors(newValue: boolean) {
                             cm.dispatch({ effects: setIncludeChildItemsEffect.of(newValue) });
                         }
                     } catch (e) { console.warn("Regex Line Filter: Error dispatching includeChildItems", e); }
+                }
+            }
+        });
+    }
+
+dispatchIncludeHeadingChildItemsToEditors(newValue: boolean) {
+        this.app.workspace.iterateAllLeaves(leaf => {
+            if (leaf.view instanceof MarkdownView) {
+                const cm = (leaf.view.editor as any).cm as EditorView;
+                if (cm) {
+                    try {
+                        if (cm.state.field(filterStateField, false) !== undefined) {
+                            cm.dispatch({ effects: setIncludeHeadingChildItemsEffect.of(newValue) });
+                        }
+                    } catch (e) { console.warn("Regex Line Filter: Error dispatching includeHeadingChildItems", e); }
                 }
             }
         });
@@ -620,6 +675,7 @@ toggleSpecificSavedRegex(regexString: string, editor: Editor, view: MarkdownView
         const isCurrentlyActive = currentActiveStrings.includes(regexString);
 
         // Dispatch the raw, unresolved string. Resolution will happen in the view.
+        console.log(`Regex Filter: Dispatching toggle for "${regexString}"`);
         const currentSelection = cm.state.selection;
         cm.dispatch({
             effects: toggleSpecificRegexStringEffect.of(regexString),
@@ -735,70 +791,88 @@ const {containerEl} = this;
 containerEl.empty();
 containerEl.createEl('h2', { text: 'Regex Line Filter Settings' });
 containerEl.createEl('h3', { text: 'General Filter Options' });
-new Setting(containerEl)
+const hideEmptyLinesDesc = 'When the filter is active, also hide lines that contain only whitespace.';
+const hideEmptyLinesSetting = new Setting(containerEl)
+    .setName('Hide empty lines')
+    .addToggle(toggle => {
+        toggle
+            .setValue(this.plugin.settings.hideEmptyLines)
+            .onChange(async (value) => {
+                this.plugin.settings.hideEmptyLines = value;
+                await this.plugin.saveSettings();
+                this.plugin.dispatchHideEmptyLinesToEditors(value);
+            });
+    });
+hideEmptyLinesSetting.nameEl.setAttribute('title', hideEmptyLinesDesc);
+hideEmptyLinesSetting.controlEl.setAttribute('title', hideEmptyLinesDesc);
 
-      .setName('Hide empty lines')
+const includeIndentsDesc = 'Automatically include indented child items (tabs, bullets, numbers) when their parent line matches the filter.';
+const includeIndentsSetting = new Setting(containerEl)
+    .setName('Include indents under filter match')
+    .addToggle(toggle => {
+        toggle
+            .setValue(this.plugin.settings.includeChildItems)
+            .onChange(async (value) => {
+                this.plugin.settings.includeChildItems = value;
+                await this.plugin.saveSettings();
+                this.plugin.dispatchIncludeChildItemsToEditors(value);
+            });
+    });
+includeIndentsSetting.nameEl.setAttribute('title', includeIndentsDesc);
+includeIndentsSetting.controlEl.setAttribute('title', includeIndentsDesc);
 
-      .setDesc('When the filter is active, also hide lines that contain only whitespace.')
+const includeHeadingDesc = 'Automatically include all lines under a heading when the heading line matches the filter.';
+const includeHeadingSetting = new Setting(containerEl)
+    .setName('Include section when heading/title matches')
+    .addToggle(toggle => {
+        toggle
+            .setValue(this.plugin.settings.includeHeadingChildItems)
+            .onChange(async (value) => {
+                this.plugin.settings.includeHeadingChildItems = value;
+                await this.plugin.saveSettings();
+                this.plugin.dispatchIncludeHeadingChildItemsToEditors(value);
+            });
+    });
+includeHeadingSetting.nameEl.setAttribute('title', includeHeadingDesc);
+includeHeadingSetting.controlEl.setAttribute('title', includeHeadingDesc);
 
-      .addToggle(toggle => toggle
-
-        .setValue(this.plugin.settings.hideEmptyLines)
-
-        .onChange(async (value) => {
-
-this.plugin.settings.hideEmptyLines = value;
-await this.plugin.saveSettings();
-this.plugin.dispatchHideEmptyLinesToEditors(value);
-        }));
-new Setting(containerEl)
-
-      .setName('Include child items')
-
-      .setDesc('Automatically include indented child items when their parent line matches the filter.')
-
-      .addToggle(toggle => toggle
-
-        .setValue(this.plugin.settings.includeChildItems)
-
-        .onChange(async (value) => {
-
-this.plugin.settings.includeChildItems = value;
-await this.plugin.saveSettings();
-this.plugin.dispatchIncludeChildItemsToEditors(value);
-        }));
-
-new Setting(containerEl)
+const templateVarsDesc = 'When enabled, templates resolve to dates or date ranges. ' +
+    'Simple variables like {{today}} or {{yesterday}} resolve to a single date. ' +
+    'Range variables like {{last-week}}, {{this-month}}, or {{next-year}} resolve to a regex matching all dates in that range (e.g., (2023-01-01|2023-01-02|...)). ' +
+    'You can also specify a custom format, e.g., {{today:DD-MM-YYYY}} or {{last-week:DD/MM/YYYY}}. ' +
+    'Supported variables: today, yesterday, tomorrow, this-week, last-week, next-week, this-month, last-month, next-month, this-year, last-year, next-year.';
+const templateVarsSetting = new Setting(containerEl)
     .setName('Enable template variables')
-    .setDesc(
-        'When enabled, templates resolve to dates or date ranges. ' +
-        'Simple variables like {{today}} or {{yesterday}} resolve to a single date. ' +
-        'Range variables like {{last-week}}, {{this-month}}, or {{next-year}} resolve to a regex matching all dates in that range (e.g., (2023-01-01|2023-01-02|...)). ' +
-        'You can also specify a custom format, e.g., {{today:DD-MM-YYYY}} or {{last-week:DD/MM/YYYY}}. ' +
-        'Supported variables: today, yesterday, tomorrow, this-week, last-week, next-week, this-month, last-month, next-month, this-year, last-year, next-year.'
-    )
-    .addToggle(toggle => toggle
-        .setValue(this.plugin.settings.enableTemplateVariables)
-        .onChange(async (value) => {
-            this.plugin.settings.enableTemplateVariables = value;
-            await this.plugin.saveSettings();
-        }));
+    .addToggle(toggle => {
+        toggle
+            .setValue(this.plugin.settings.enableTemplateVariables)
+            .onChange(async (value) => {
+                this.plugin.settings.enableTemplateVariables = value;
+                await this.plugin.saveSettings();
+            });
+    });
+templateVarsSetting.nameEl.setAttribute('title', templateVarsDesc);
+templateVarsSetting.controlEl.setAttribute('title', templateVarsDesc);
 
-new Setting(containerEl)
+const transparencyDesc = 'Sets the transparency amount for the note title when a filter is active and the title does not match the filter. 0 is fully opaque, 1 is fully transparent.';
+const transparencySetting = new Setting(containerEl)
     .setName('Note title transparency')
-    .setDesc('Sets the transparency amount for the note title when a filter is active and the title does not match the filter. 0 is fully opaque, 1 is fully transparent.')
-    .addSlider(slider => slider
-        .setLimits(0, 1, 0.1)
-        .setValue(this.plugin.settings.noteTitleTransparency)
-        .setDynamicTooltip()
-        .onChange(async (value) => {
-            this.plugin.settings.noteTitleTransparency = value;
-            await this.plugin.saveSettings();
-            // Update the CSS variable in real-time
-            const opacity = 1 - value;
-            document.documentElement.style.setProperty('--regex-filter-title-fade-opacity', opacity.toString());
-            this.plugin.updateBodyClassForActiveLeaf();
-        }));
+    .addSlider(slider => {
+        slider
+            .setLimits(0, 1, 0.1)
+            .setValue(this.plugin.settings.noteTitleTransparency)
+            .setDynamicTooltip()
+            .onChange(async (value) => {
+                this.plugin.settings.noteTitleTransparency = value;
+                await this.plugin.saveSettings();
+                // Update the CSS variable in real-time
+                const opacity = 1 - value;
+                document.documentElement.style.setProperty('--regex-filter-title-fade-opacity', opacity.toString());
+                this.plugin.updateBodyClassForActiveLeaf();
+            });
+    });
+transparencySetting.nameEl.setAttribute('title', transparencyDesc);
+transparencySetting.controlEl.setAttribute('title', transparencyDesc);
 
 containerEl.createEl('hr');
 containerEl.createEl('h3', { text: 'Saved Regex Filters' });
