@@ -41,9 +41,14 @@ The plugin allows users to filter the active editor view in Obsidian so that onl
 
 **Thank You:**
 - To **SkepticMystic** for the inspiration for saveable individual filters in your **Advanced Cursors** plugin.
-- To **FelipeRearden**, **stef-rausch* and **nanjingman** for the feature suggestions!
+- To **FelipeRearden**, **stef-rausch** and **nanjingman** for the feature suggestions!
 
 **License:**
 Apache 2.0
+<div><img src="images/spacing.png" style="height: 15px; width: 5px;"></div>
 
-<a href="https://www.buymeacoffee.com/64mm4kn1f3" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" style="height: 60px !important;width: 217px !important;" ></a>
+---
+
+<div><img src="images/spacing.png" style="height: 30px; width: 5px;"></div>
+
+<a href="https://www.buymeacoffee.com/64mm4kn1f3" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" style="height: 60px; width: 217px;"></a>
