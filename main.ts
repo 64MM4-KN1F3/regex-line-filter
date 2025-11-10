@@ -16,29 +16,31 @@ export interface SavedRegexItem {
 }
 
 interface RegexLineFilterSettings {
-  hideEmptyLines: boolean;
-  includeChildItems: boolean;
-  includeHeadingChildItems: boolean;
-  enableTemplateVariables: boolean;
-  noteTitleTransparency: number;
-  regexHistory: string[];
-  savedRegexes: SavedRegexItem[];
-  pinnedRegexes: string[];
-  persistedFilters: { [filePath: string]: string[] };
-  // activeFilters: string[]; // This will no longer be stored in settings
+   hideEmptyLines: boolean;
+   includeChildItems: boolean;
+   includeHeadingChildItems: boolean;
+   enableTemplateVariables: boolean;
+   noteTitleTransparency: number;
+   regexHistory: string[];
+   savedRegexes: SavedRegexItem[];
+   pinnedRegexes: string[];
+   persistedFilters: { [filePath: string]: string[] };
+   copyOnlyFilteredText: boolean;
+   // activeFilters: string[]; // This will no longer be stored in settings
 }
 
 const DEFAULT_SETTINGS: RegexLineFilterSettings = {
-  hideEmptyLines: true,
-  includeChildItems: true,
-  includeHeadingChildItems: false,
-  enableTemplateVariables: false,
-  noteTitleTransparency: 0,
-  regexHistory: [],
-  savedRegexes: [],
-  pinnedRegexes: [],
-  persistedFilters: {},
-  // activeFilters: [], // This is now managed per-editor instance
+   hideEmptyLines: true,
+   includeChildItems: true,
+   includeHeadingChildItems: false,
+   enableTemplateVariables: false,
+   noteTitleTransparency: 0,
+   regexHistory: [],
+   savedRegexes: [],
+   pinnedRegexes: [],
+   persistedFilters: {},
+   copyOnlyFilteredText: true,
+   // activeFilters: [], // This is now managed per-editor instance
 }
 
 // --- Helper to build combined regex ---
@@ -62,10 +64,11 @@ function buildCombinedRegex(regexStrings: string[]): RegExp | null {
 
 // --- State & Effects ---
 interface FilterState {
-  unresolvedRegexStrings: string[]; // Stores the original, UNRESOLVED strings
-  hideEmptyLines: boolean;
-  includeChildItems: boolean;
-  includeHeadingChildItems: boolean;
+   unresolvedRegexStrings: string[]; // Stores the original, UNRESOLVED strings
+   hideEmptyLines: boolean;
+   includeChildItems: boolean;
+   includeHeadingChildItems: boolean;
+   copyOnlyFilteredText: boolean;
 }
 
 const toggleSpecificRegexStringEffect = StateEffect.define<string>();      // Adds/removes a specific regex string
@@ -75,6 +78,7 @@ const replaceAllRegexStringsEffect = StateEffect.define<string[]>();      // Rep
 const setHideEmptyLinesEffect = StateEffect.define<boolean>();
 const setIncludeChildItemsEffect = StateEffect.define<boolean>();
 const setIncludeHeadingChildItemsEffect = StateEffect.define<boolean>();
+const setCopyOnlyFilteredTextEffect = StateEffect.define<boolean>();
 
 
 
@@ -84,14 +88,15 @@ const setIncludeHeadingChildItemsEffect = StateEffect.define<boolean>();
 const filterStateField = StateField.define<FilterState>({
 
 create(editorState: EditorState): FilterState {
-        // Initial state values will be set by .init() in plugin.onload
-        return {
-            unresolvedRegexStrings: [],
-            hideEmptyLines: DEFAULT_SETTINGS.hideEmptyLines, // Fallback, should be overridden by .init
-            includeChildItems: DEFAULT_SETTINGS.includeChildItems, // Fallback
-            includeHeadingChildItems: DEFAULT_SETTINGS.includeHeadingChildItems, // Fallback
-        };
-    },
+      // Initial state values will be set by .init() in plugin.onload
+      return {
+          unresolvedRegexStrings: [],
+          hideEmptyLines: DEFAULT_SETTINGS.hideEmptyLines, // Fallback, should be overridden by .init
+          includeChildItems: DEFAULT_SETTINGS.includeChildItems, // Fallback
+          includeHeadingChildItems: DEFAULT_SETTINGS.includeHeadingChildItems, // Fallback
+          copyOnlyFilteredText: DEFAULT_SETTINGS.copyOnlyFilteredText, // Fallback
+      };
+  },
 
 update(value, tr): FilterState {
         let newState = { ...value };
@@ -121,6 +126,8 @@ update(value, tr): FilterState {
                 newState.includeChildItems = effect.value;
             } else if (effect.is(setIncludeHeadingChildItemsEffect)) {
                newState.includeHeadingChildItems = effect.value;
+            } else if (effect.is(setCopyOnlyFilteredTextEffect)) {
+                newState.copyOnlyFilteredText = effect.value;
             }
         }
         return newState;
@@ -148,9 +155,12 @@ private createFilterViewPlugin() {
     return ViewPlugin.fromClass(
         class {
             decorations: DecorationSet;
+            view: EditorView;
 
             constructor(view: EditorView) {
                 this.decorations = this.buildDecorations(view);
+                this.view = view;
+                this.updateCopyEventListener(view);
             }
 
             update(update: ViewUpdate) {
@@ -162,12 +172,123 @@ private createFilterViewPlugin() {
                         // This update just rebuilds decorations.
                     }
                     this.decorations = this.buildDecorations(update.view);
+                    if (stateChanged) {
+                        // Update copy event listener when copyOnlyFilteredText changes
+                        this.updateCopyEventListener(update.view);
+                    }
+                }
+            }
+
+            updateCopyEventListener(view: EditorView) {
+                // Remove existing copy event listener
+                view.dom.removeEventListener('copy', this.handleCopy);
+                // Add new copy event listener
+                view.dom.addEventListener('copy', this.handleCopy);
+            }
+
+            handleCopy = (event: ClipboardEvent) => {
+                const view = this.view;
+                const { unresolvedRegexStrings, copyOnlyFilteredText } = view.state.field(filterStateField);
+                if (!copyOnlyFilteredText || unresolvedRegexStrings.length === 0) {
+                    return; // Use default behavior
+                }
+
+                const selection = view.state.selection;
+                if (!selection || selection.ranges.length === 0) {
+                    return; // No selection
+                }
+
+                const doc = view.state.doc;
+                const resolvedRegexStrings = plugin.settings.enableTemplateVariables
+                    ? unresolvedRegexStrings.map(s => Templater.resolve(s))
+                    : unresolvedRegexStrings;
+                const combinedRegex = buildCombinedRegex(resolvedRegexStrings);
+                if (!combinedRegex) {
+                    return; // No valid regex
+                }
+
+                const isVisibleCopy = new Array(doc.lines + 1).fill(false);
+                const getIndentLevelCopy = (text: string): number => {
+                    const match = text.match(/^(\s*)/);
+                    return match ? match.length : 0;
+                };
+                const getHeadingLevelCopy = (text: string): number => {
+                    const match = text.match(/^(#+)\s/);
+                    return match ? match.length : 0;
+                };
+
+                const isVisible = new Array(doc.lines + 1).fill(false);
+                const getIndentLevel = (text: string): number => {
+                    const match = text.match(/^(\s*)/);
+                    return match ? match[1].length : 0;
+                };
+                const getHeadingLevel = (text: string): number => {
+                    const match = text.match(/^(#+)\s/);
+                    return match ? match[1].length : 0;
+                };
+
+                // Calculate visible lines (similar to buildDecorations)
+                const { includeChildItems, includeHeadingChildItems } = view.state.field(filterStateField);
+                for (let i = 1; i <= doc.lines; i++) {
+                    const line = doc.line(i);
+                    if (combinedRegex.test(line.text)) {
+                        isVisible[i] = true;
+                        if (includeChildItems) {
+                            const parentIndent = getIndentLevel(line.text);
+                            for (let j = i + 1; j <= doc.lines; j++) {
+                                const childLine = doc.line(j);
+                                const childIndent = getIndentLevel(childLine.text);
+                                if (childIndent > parentIndent) {
+                                    isVisible[j] = true;
+                                } else {
+                                    break;
+                                }
+                            }
+                        }
+                        if (includeHeadingChildItems) {
+                            const parentHeadingLevel = getHeadingLevel(line.text);
+                            if (parentHeadingLevel > 0) {
+                                for (let j = i + 1; j <= doc.lines; j++) {
+                                    const childLine = doc.line(j);
+                                    const childHeadingLevel = getHeadingLevel(childLine.text);
+                                    if (childHeadingLevel > 0 && childHeadingLevel <= parentHeadingLevel) {
+                                        break;
+                                    }
+                                    isVisible[j] = true;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Filter the selected text to only include visible lines
+                let filteredText = '';
+                for (const range of selection.ranges) {
+                    const startLine = doc.lineAt(range.from).number;
+                    const endLine = doc.lineAt(range.to).number;
+                    for (let i = startLine; i <= endLine; i++) {
+                        if (isVisible[i]) {
+                            const line = doc.line(i);
+                            const lineStart = Math.max(range.from, line.from);
+                            const lineEnd = Math.min(range.to, line.to);
+                            if (lineStart < lineEnd) {
+                                filteredText += line.text.slice(lineStart - line.from, lineEnd - line.from) + '\n';
+                            } else {
+                                filteredText += line.text + '\n';
+                            }
+                        }
+                    }
+                }
+
+                if (filteredText) {
+                    event.clipboardData?.setData('text/plain', filteredText.trimEnd());
+                    event.preventDefault();
                 }
             }
 
             buildDecorations(view: EditorView): DecorationSet {
                 const builder = new RangeSetBuilder<Decoration>();
-                const { unresolvedRegexStrings, hideEmptyLines, includeChildItems, includeHeadingChildItems } = view.state.field(filterStateField);
+                const { unresolvedRegexStrings, hideEmptyLines, includeChildItems, includeHeadingChildItems, copyOnlyFilteredText } = view.state.field(filterStateField);
                 console.log("Regex Filter: buildDecorations called. Unresolved strings:", unresolvedRegexStrings);
                 const enabled = unresolvedRegexStrings.length > 0;
 
@@ -199,7 +320,17 @@ private createFilterViewPlugin() {
                 const getHeadingLevel = (text: string): number => {
                     const match = text.match(/^(#+)\s/);
                     return match ? match[1].length : 0;
-                }
+                };
+
+                const isVisibleCopy = new Array(doc.lines + 1).fill(false);
+                const getIndentLevelCopy = (text: string): number => {
+                    const match = text.match(/^(\s*)/);
+                    return match ? match[1].length : 0;
+                };
+                const getHeadingLevelCopy = (text: string): number => {
+                    const match = text.match(/^(#+)\s/);
+                    return match ? match[1].length : 0;
+                };
 
                 try {
                     for (let i = 1; i <= doc.lines; i++) {
@@ -296,6 +427,7 @@ this.registerEditorExtension([
         hideEmptyLines: this.settings.hideEmptyLines,
         includeChildItems: this.settings.includeChildItems,
         includeHeadingChildItems: this.settings.includeHeadingChildItems,
+        copyOnlyFilteredText: this.settings.copyOnlyFilteredText,
     })),
     this.createFilterViewPlugin()
 ]);
@@ -309,6 +441,7 @@ this.app.workspace.onLayoutReady(() => {
 this.dispatchHideEmptyLinesToEditors(this.settings.hideEmptyLines);
 this.dispatchIncludeChildItemsToEditors(this.settings.includeChildItems);
 this.dispatchIncludeHeadingChildItemsToEditors(this.settings.includeHeadingChildItems);
+this.dispatchCopyOnlyFilteredTextToEditors(this.settings.copyOnlyFilteredText);
 this.updateBodyClassForActiveLeaf();
         });
 this.updateBodyClassForActiveLeaf();
@@ -436,11 +569,14 @@ if (typeof this.settings.hideEmptyLines !== 'boolean') {
 this.settings.hideEmptyLines = DEFAULT_SETTINGS.hideEmptyLines;
         }
 if (typeof this.settings.enableTemplateVariables !== 'boolean') {
-this.settings.enableTemplateVariables = DEFAULT_SETTINGS.enableTemplateVariables;
+ this.settings.enableTemplateVariables = DEFAULT_SETTINGS.enableTemplateVariables;
         }
 if (typeof this.settings.noteTitleTransparency !== 'number') {
-this.settings.noteTitleTransparency = DEFAULT_SETTINGS.noteTitleTransparency;
+ this.settings.noteTitleTransparency = DEFAULT_SETTINGS.noteTitleTransparency;
         }
+if (typeof this.settings.copyOnlyFilteredText !== 'boolean') {
+    this.settings.copyOnlyFilteredText = DEFAULT_SETTINGS.copyOnlyFilteredText;
+}
 
     }
 
@@ -526,6 +662,21 @@ dispatchIncludeHeadingChildItemsToEditors(newValue: boolean) {
                             cm.dispatch({ effects: setIncludeHeadingChildItemsEffect.of(newValue) });
                         }
                     } catch (e) { console.warn("Regex Line Filter: Error dispatching includeHeadingChildItems", e); }
+                }
+            }
+        });
+    }
+
+dispatchCopyOnlyFilteredTextToEditors(newValue: boolean) {
+        this.app.workspace.iterateAllLeaves(leaf => {
+            if (leaf.view instanceof MarkdownView) {
+                const cm = (leaf.view.editor as any).cm as EditorView;
+                if (cm) {
+                    try {
+                        if (cm.state.field(filterStateField, false) !== undefined) {
+                            cm.dispatch({ effects: setCopyOnlyFilteredTextEffect.of(newValue) });
+                        }
+                    } catch (e) { console.warn("Regex Line Filter: Error dispatching copyOnlyFilteredText", e); }
                 }
             }
         });
@@ -873,6 +1024,21 @@ const transparencySetting = new Setting(containerEl)
     });
 transparencySetting.nameEl.setAttribute('title', transparencyDesc);
 transparencySetting.controlEl.setAttribute('title', transparencyDesc);
+
+const copyOnlyFilteredTextDesc = 'When disabled copying a block of text will include any filtered-out items existing within the selected items';
+const copyOnlyFilteredTextSetting = new Setting(containerEl)
+    .setName('Copy only filtered text when filter(s) enabled')
+    .addToggle(toggle => {
+        toggle
+            .setValue(this.plugin.settings.copyOnlyFilteredText)
+            .onChange(async (value) => {
+                this.plugin.settings.copyOnlyFilteredText = value;
+                await this.plugin.saveSettings();
+                this.plugin.dispatchCopyOnlyFilteredTextToEditors(value);
+            });
+    });
+copyOnlyFilteredTextSetting.nameEl.setAttribute('title', copyOnlyFilteredTextDesc);
+copyOnlyFilteredTextSetting.controlEl.setAttribute('title', copyOnlyFilteredTextDesc);
 
 containerEl.createEl('hr');
 containerEl.createEl('h3', { text: 'Saved Regex Filters' });
