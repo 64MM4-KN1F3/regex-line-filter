@@ -15,4 +15,3 @@ __tests__/
 __mocks__/
 jest.config.js
 jest.setup.js
-DEV_README.md
