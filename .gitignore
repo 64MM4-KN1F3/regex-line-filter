@@ -6,3 +6,12 @@ TODO.md
 test.sh
 *.zip
 build_notes/
+.DS_Store
+.roo/
+
+# Testing
+coverage/
+__tests__/
+__mocks__/
+jest.config.js
+jest.setup.js
