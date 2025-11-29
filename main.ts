@@ -1,7 +1,7 @@
 import { App, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting, WorkspaceLeaf, TFile, Events, TAbstractFile } from 'obsidian';
 import { StateField, StateEffect, RangeSetBuilder, EditorState } from '@codemirror/state';
 import { Templater } from './Templater';
-import { Decoration, DecorationSet, EditorView, ViewPlugin, ViewUpdate } from '@codemirror/view';
+import { Decoration, DecorationSet, EditorView, ViewPlugin, ViewUpdate, PluginValue } from '@codemirror/view';
 
 // --- Constants ---
 const REGEX_HISTORY_LIMIT = 5;
@@ -15,7 +15,7 @@ export interface SavedRegexItem {
   regex: string;
 }
 
-interface RegexLineFilterSettings {
+export interface RegexLineFilterSettings {
    hideEmptyLines: boolean;
    includeChildItems: boolean;
    includeHeadingChildItems: boolean;
@@ -29,7 +29,7 @@ interface RegexLineFilterSettings {
    // activeFilters: string[]; // This will no longer be stored in settings
 }
 
-const DEFAULT_SETTINGS: RegexLineFilterSettings = {
+export const DEFAULT_SETTINGS: RegexLineFilterSettings = {
    hideEmptyLines: true,
    includeChildItems: true,
    includeHeadingChildItems: false,
@@ -63,7 +63,7 @@ function buildCombinedRegex(regexStrings: string[]): RegExp | null {
 }
 
 // --- State & Effects ---
-interface FilterState {
+export interface FilterState {
    unresolvedRegexStrings: string[]; // Stores the original, UNRESOLVED strings
    hideEmptyLines: boolean;
    includeChildItems: boolean;
@@ -71,21 +71,21 @@ interface FilterState {
    copyOnlyFilteredText: boolean;
 }
 
-const toggleSpecificRegexStringEffect = StateEffect.define<string>();      // Adds/removes a specific regex string
-const applyManualRegexStringEffect = StateEffect.define<string | null>(); // Sets activeRegexStrings to [newString] or []
-const clearAllRegexesEffect = StateEffect.define<void>();                 // Clears all active regex strings
+export const toggleSpecificRegexStringEffect = StateEffect.define<string>();      // Adds/removes a specific regex string
+export const applyManualRegexStringEffect = StateEffect.define<string | null>(); // Sets activeRegexStrings to [newString] or []
+export const clearAllRegexesEffect = StateEffect.define<void>();                 // Clears all active regex strings
 const replaceAllRegexStringsEffect = StateEffect.define<string[]>();      // Replaces all strings, used for loading from persistence
-const setHideEmptyLinesEffect = StateEffect.define<boolean>();
-const setIncludeChildItemsEffect = StateEffect.define<boolean>();
-const setIncludeHeadingChildItemsEffect = StateEffect.define<boolean>();
-const setCopyOnlyFilteredTextEffect = StateEffect.define<boolean>();
+export const setHideEmptyLinesEffect = StateEffect.define<boolean>();
+export const setIncludeChildItemsEffect = StateEffect.define<boolean>();
+export const setIncludeHeadingChildItemsEffect = StateEffect.define<boolean>();
+export const setCopyOnlyFilteredTextEffect = StateEffect.define<boolean>();
 
 
 
 
 // --- StateField definition ---
 
-const filterStateField = StateField.define<FilterState>({
+export const filterStateField = StateField.define<FilterState>({
 
 create(editorState: EditorState): FilterState {
       // Initial state values will be set by .init() in plugin.onload
@@ -140,7 +140,7 @@ update(value, tr): FilterState {
 
 // --- Plugin Class definition ---
 
-export default class RegexLineFilterPlugin extends Plugin {
+export class RegexLineFilterPlugin extends Plugin {
 
 settings: RegexLineFilterSettings;
 lastRegexStr: string | null = null; // For pre-filling manual input modal
@@ -912,7 +912,7 @@ if (this.app.commands.editorCommands[fullCommandId]) delete this.app.commands.ed
 
 // --- Settings Tab Class ---
 
-class RegexLineFilterSettingTab extends PluginSettingTab {
+export class RegexLineFilterSettingTab extends PluginSettingTab {
 
 plugin: RegexLineFilterPlugin;
 savedRegexesDiv: HTMLDivElement;
@@ -1195,7 +1195,7 @@ this.plugin.events.trigger('filter-changed');
 
 // --- Modal Class definition (RegexInputModal) ---
 
-class RegexInputModal extends Modal {
+export class RegexInputModal extends Modal {
 
 result: string;
 onSubmit: (result: string | null, isPinned: boolean) => void;
@@ -1347,7 +1347,7 @@ createHistoryItem(container: HTMLElement, regexString: string, isPinned: boolean
 
 // --- AddSavedRegexModal Class ---
 
-class AddSavedRegexModal extends Modal {
+export class AddSavedRegexModal extends Modal {
 
 plugin: RegexLineFilterPlugin; settingsTab: RegexLineFilterSettingTab; existingItem: SavedRegexItem | null;
 itemIndex: number;
@@ -1491,4 +1491,4 @@ async doSubmit() {
 
 onClose() { this.contentEl.empty(); }
 
-}
+}export default RegexLineFilterPlugin;
