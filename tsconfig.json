@@ -18,7 +18,7 @@
       "ES7"
     ]
   },
-  "include": [
+  "exclude": ["node_modules", "**/*.test.ts", "__tests__", "__mocks__"], "include": [
     "**/*.ts"
   ]
 }
