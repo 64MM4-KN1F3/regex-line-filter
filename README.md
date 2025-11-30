@@ -53,4 +53,4 @@ Apache 2.0
 
 <div><img src="images/spacing.png" style="height: 30px; width: 5px;"></div>
 
-<a href="https://www.buymeacoffee.com/64mm4kn1f3" target="_blank"><img src="images/coffee.png" alt="Buy Me A Coffee" style="height: 60px; width: 217px;"></a>
+<a href="https://support.inheadlights.com" target="_blank"><img src="images/coffee.png" alt="Buy Me A Coffee" style="height: 60px; width: 217px;"></a>

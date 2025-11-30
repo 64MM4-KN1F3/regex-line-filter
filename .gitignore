@@ -17,3 +17,4 @@ __mocks__/
 jest.config.js
 jest.setup.js
 .DS_Store
+.env
