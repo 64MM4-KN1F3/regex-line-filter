@@ -2,7 +2,7 @@
 ![image](/images/logo_20.png)
 
 
-**Version 1.3.1**
+**Version 1.3.5**
 
 #### Purpose:
 The plugin allows users to filter the active editor view in Obsidian so that only lines matching a user-supplied regular expression are displayed. Users can edit these visible lines. Toggling the filter off restores the full view of the note with the edits preserved. Toggling it back on re-prompts for a regex (pre-filled with the last used one).
